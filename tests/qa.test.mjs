@@ -149,7 +149,7 @@ for (const T of TARGETS) {
       ], {}, async (app) => {
         await openCharacter(app, "Sky");
         assert.equal(await unspent(app), 150 - (7 * 2 + 5 * 3 + 1 * 3 + 3 * 3), "Magic+Planes at 2 SP, Essence/Barrowman/Acheron at 3");
-        const sk = (await stored(app, "Scholarly")).purchasedSkills.map((p) => `${p.skillId}:${p.label}:${p.timesPurchased}`).sort();
+        const sk = (await stored(app, "Scholarly")).purchasedSkills.filter((p) => p.skillId !== "rw_common_free").map((p) => `${p.skillId}:${p.label}:${p.timesPurchased}`).sort();
         if (T.name === "hub") assert.deepEqual(sk, ["bg_scholar_knowledge_discount:Magic:5", "bg_scholar_knowledge_discount:Planes:2", "knowledge_area:Barrowman:1", "knowledge_area:Essence:5", "knowledge_area_rare:Acheron:3"], "saved to Base44");
         await back(app); await openCharacter(app, "Ace");
         assert.equal(await unspent(app), 150 - (10 + 15), "already-correct Scholar unchanged");
@@ -187,7 +187,7 @@ for (const T of TARGETS) {
         await sel.selectOption("__other"); await pause(app.frame);
         await app.frame.locator('input[placeholder^="Custom common knowledge"]').first().fill("Toads"); await pause(app.frame, 200);
         await save(app);
-        const sk = (await stored(app, "Myranda")).purchasedSkills.map((p) => `${p.skillId}:${p.label}`).sort();
+        const sk = (await stored(app, "Myranda")).purchasedSkills.filter((p) => p.skillId !== "rw_common_free").map((p) => `${p.skillId}:${p.label}`).sort();
         assert.deepEqual(sk, ["bg_scholar_knowledge_discount:Toads", "knowledge_area:Frogs"]);
       }));
 
@@ -216,6 +216,53 @@ for (const T of TARGETS) {
       ], {}, async (app) => {
         await openCharacter(app, "Gil");
         assert.equal(await unspent(app), 150 - (10 + 12 + 6));
+      }));
+    });
+
+    // ---------------- Prerequisites ----------------
+    describe("prerequisites", () => {
+      const row = (app, name) => app.frame.locator(`xpath=//span[normalize-space(text())="${name}"]/ancestor::div[.//button][1]`).first();
+      test("a skill can't be bought until its prerequisite is owned, and a needed prerequisite can't be removed", () => withApp(T, [
+        char({ name: "Focuser", playerName: "Fay", classId: "warrior", earnedSP: 100 }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Fay"); await tab(app, "Warrior Skills");
+        assert.ok(await row(app, "Focus +2").locator("button", { hasText: "+" }).isDisabled(), "Focus +2 blocked");
+        assert.match(await row(app, "Focus +2").innerText(), /Req: Focus \+1 \(missing\)/);
+        await row(app, "Focus +1").locator("button", { hasText: "+" }).click(); await pause(app.frame);
+        await row(app, "Focus +2").locator("button", { hasText: "+" }).click(); await pause(app.frame);
+        assert.equal(await unspent(app), 150 - 30);
+        const minus = row(app, "Focus +1").locator("button", { hasText: "−" });
+        assert.ok(await minus.isDisabled(), "Focus +1 needed by Focus +2");
+        assert.match(await row(app, "Focus +1").innerText(), /Needed by Focus \+2/);
+      }));
+
+      test("Spell Pool 4 alone: missing Spell Pools 1-3 are added when SP allows, otherwise a note is added", () => withApp(T, [
+        char({ name: "Rich Mage", playerName: "Rita", classId: "mage", earnedSP: 100, purchasedSkills: [skill("mage_pool_4")] }),
+        char({ name: "Poor Mage", playerName: "Pete", classId: "mage", earnedSP: 0, startingSP: 20, purchasedSkills: [skill("mage_pool_4")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Rita");
+        assert.equal(await unspent(app), 150 - (0 + 5 + 10 + 15), "pools 1-3 bought");
+        await back(app);
+        const style = (await app.frame.locator("button").filter({ hasText: "Pete" }).first().getAttribute("style")) || "";
+        assert.match(style, /red|#ef4444|rgb\(239, 68, 68\)/i, "exception note gives the red outline");
+        await openCharacter(app, "Pete");
+        assert.equal(await unspent(app), 20 - 15, "build left unchanged");
+        const boxes = await app.frame.evaluate(() => [...document.querySelectorAll("textarea")].map((t) => t.value).join("\n"));
+        assert.match(boxes, /Prerequisite exception: missing prerequisites would cost 10 more SP/);
+        assert.match(boxes, /Spell Pool 4 requires Spell Pool 3/);
+        if (T.name === "hub") assert.match((await stored(app, "Poor Mage")).notes, /Spell Pool 4 requires Spell Pool 3/);
+      }));
+
+      test("Read and Write (Common) is free for everyone except Orcs and Half-Trolls; Rank 5 crafting needs Ranks 1-4", () => withApp(T, [
+        char({ name: "Smith", playerName: "Sol", species: "Human", earnedSP: 100, purchasedSkills: [skill("smithing", 2), skill("smithing_5")] }),
+        char({ name: "Grok", playerName: "Gus", species: "Orc", earnedSP: 100 }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Sol");
+        assert.equal(await unspent(app), 150 - (4 * 4 + 8), "Smithing filled to 4 ranks; Read and Write free");
+        await tab(app, "Everyman Skills");
+        assert.match(await text(app.frame), /Read and Write \(Common\) — Free/);
+        await back(app); await openCharacter(app, "Gus"); await tab(app, "Everyman Skills");
+        assert.doesNotMatch(await text(app.frame), /Read and Write \(Common\) — Free/);
       }));
     });
 
