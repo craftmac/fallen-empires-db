@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# TFE Character Database regression tests.
+#
+#   ./qa check            run every test against both copies of the app
+#   ./qa check <words>    run only tests whose name matches <words>
+#
+# Tests the GitHub Pages copy (this repo's index.html) and, when the website
+# repo is checked out next to this one (../the-fallen-empires-hub), the Base44
+# copy and its Monthly Membership function. Point elsewhere with TFE_HUB=<path
+# to public/character-db/index.html>. Needs Node 22+ and Playwright's Chromium
+# (npm install && npx playwright install chromium).
+set -euo pipefail
+cd "$(dirname "$0")"
+cmd="${1:-}"
+if [[ "$cmd" != "check" ]]; then
+  echo "Usage: ./qa check [test name filter]" >&2
+  exit 2
+fi
+shift
+args=(--test --test-concurrency=1 --test-reporter=spec)
+[[ $# -gt 0 ]] && args+=(--test-name-pattern="$*")
+exec node "${args[@]}" tests/qa.test.mjs tests/membership.test.mjs

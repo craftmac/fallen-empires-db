@@ -1,0 +1,305 @@
+// TFE Character Database regression suite. Run with:  ./qa check
+// Every test runs against both copies of the app (GitHub Pages and the Base44
+// website copy) when both are present; see tests/harness.mjs.
+import { describe, test, before, after } from "node:test";
+import assert from "node:assert/strict";
+import {
+  TARGETS, startServer, stopServer, startBrowser, stopBrowser, open, char, skill, favor,
+  text, pause, openCharacter, tab, unspent, save, back, printSheet, circles, stored,
+} from "./harness.mjs";
+
+before(async () => { await startServer(); await startBrowser(); });
+after(async () => { await stopBrowser(); await stopServer(); });
+
+// Opens the app, runs fn, then checks the page threw no JavaScript errors.
+async function withApp(target, chars, opts, fn) {
+  const app = await open(target, chars, opts);
+  try { await fn(app); assert.deepEqual(app.errors, [], "page errors: " + app.errors.join(" | ")); }
+  finally { await app.close(); }
+}
+
+for (const T of TARGETS) {
+  describe(`${T.label}`, () => {
+    // ---------------- Access, dashboard, notes ----------------
+    describe("access and dashboard", () => {
+      test("GM sees every character", () => withApp(T, [char({ name: "Alpha", playerName: "Ann" }), char({ name: "Bravo", playerName: "Ben" })], {}, async (app) => {
+        const t = await text(app.frame);
+        assert.match(t, /Alpha/); assert.match(t, /Bravo/);
+      }));
+
+      test("generated sample characters are removed; imported characters are kept", () => withApp(T, [
+        char({ id: "seed-01", name: "Aldric Stoneheart", playerName: "Travis" }),
+        char({ id: "seed-15", name: "Mira Sunsong", playerName: "Taylor" }),
+        char({ name: "Imported Hero", playerName: "Real Player" }),
+      ], {}, async (app) => {
+        const t = await text(app.frame);
+        assert.doesNotMatch(t, /Aldric Stoneheart|Mira Sunsong/);
+        assert.match(t, /Imported Hero/);
+        if (T.name === "gh") {
+          const left = await app.page.evaluate(() => JSON.parse(localStorage.getItem("tfe_characters")).map((c) => c.name));
+          assert.deepEqual(left, ["Imported Hero"]);
+        } else {
+          const rows = await app.page.evaluate(() => window.__store.rows.map((r) => r.name));
+          assert.deepEqual(rows, ["Imported Hero"]);
+        }
+      }));
+
+      test("no 'Load Test Data' button", () => withApp(T, [char()], {}, async (app) => {
+        assert.equal(await app.frame.locator("text=Load Test Data").count(), 0);
+      }));
+
+      test("characters with notes get a red outline; others do not", () => withApp(T, [
+        char({ name: "Has Notes", playerName: "Nina", notes: "Owes 3 crowns" }), char({ name: "No Notes", playerName: "Ned" }),
+      ], {}, async (app) => {
+        const style = async (n) => (await app.frame.locator("button").filter({ hasText: n }).first().getAttribute("style")) || "";
+        assert.match(await style("Nina"), /red|#ef4444|rgb\(2(20|39)/i);
+        assert.doesNotMatch(await style("Ned"), /red|#ef4444/i);
+      }));
+
+      test("a player sees only their own characters and cannot edit them", () => withApp(T, [
+        char({ name: "Mine", playerName: "Pat", playerEmail: "pat@example.com" }),
+        char({ name: "Not Mine", playerName: "Quinn", playerEmail: "quinn@example.com" }),
+      ], { role: "player", email: "pat@example.com" }, async (app) => {
+        const t = await text(app.frame);
+        assert.match(t, /Mine/); assert.doesNotMatch(t, /Not Mine/);
+        await openCharacter(app, "Mine", { edit: false });
+        assert.equal(await app.frame.locator("button", { hasText: /^Edit/ }).count(), 0);
+      }));
+
+      if (T.name === "hub") {
+        test("player email login: unknown email is refused, case does not matter, Notes save", () => withApp(T, [
+          char({ name: "Seraphine", playerName: "Jess", playerEmail: "jess@example.com" }),
+        ], { role: "player", email: "" }, async (app) => {
+          const f = app.frame;
+          await f.fill("#tfe-login-email", "nobody@example.com"); await f.click("text=View my characters"); await pause(f, 300);
+          assert.ok((await f.locator("#tfe-login-error").innerText()).length > 0);
+          await f.fill("#tfe-login-email", " JESS@Example.com "); await f.click("text=View my characters"); await pause(f, 400);
+          await openCharacter(app, "Seraphine", { edit: false });
+          await f.fill("#tfe-player-notes", "Missed last event"); await f.click("text=Save notes"); await pause(f, 300);
+          assert.equal((await stored(app, "Seraphine")).notes, "Missed last event");
+        }));
+      }
+    });
+
+    // ---------------- Editor behaviour ----------------
+    describe("editor", () => {
+      test("Save keeps the character open and shows Saved", () => withApp(T, [char({ name: "Saver", playerName: "Sam" })], {}, async (app) => {
+        await openCharacter(app, "Sam");
+        await app.frame.locator("label", { hasText: "Loose Paid" }).locator("input").fill("42");
+        assert.equal(await app.frame.locator("button", { hasText: /^Save$/ }).count(), 1);
+        await save(app);
+        assert.equal(await app.frame.locator("button", { hasText: /^Saved/ }).count(), 1, "button should read Saved");
+        assert.ok(await app.frame.locator("button", { hasText: /Back/ }).count(), "still in the editor");
+        assert.equal(String((await stored(app, "Saver")).checkout?.loosePaid), "42");
+      }));
+
+      test("Tickets Available field is gone; Checkout boxes are present", () => withApp(T, [char({ name: "Tix", playerName: "Tia" })], {}, async (app) => {
+        await openCharacter(app, "Tia");
+        const t = await text(app.frame);
+        assert.doesNotMatch(t, /Tickets Available/);
+        for (const box of ["Membership", "Spend Crowns for SP", "Waiver"]) assert.match(t, new RegExp(box));
+      }));
+    });
+
+    // ---------------- SP math ----------------
+    describe("skill points", () => {
+      test("unspent SP = starting + earned - skill costs", () => withApp(T, [
+        char({ name: "Math", playerName: "Max", earnedSP: 100, purchasedSkills: [skill("track", 3)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Max");
+        assert.equal(await unspent(app), 150 - 9);
+      }));
+
+      test("stacked discount: Track (Nomad and Ranger) costs 1 SP", () => withApp(T, [
+        char({ name: "Stack", playerName: "Sid", classId: "ranger", background: "Nomad", purchasedSkills: [skill("bg_nomad_ranger_track", 4)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Sid");
+        assert.equal(await unspent(app), 150 - 4);
+      }));
+
+      test("Iron Body can be bought up to 4 times", () => withApp(T, [
+        char({ name: "Monk Iron", playerName: "Ira", classId: "monk", purchasedSkills: [skill("monk_iron_body", 3)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Ira");
+        const row = app.frame.locator('xpath=//*[normalize-space(text())="Iron Body"]/ancestor::div[.//button][1]').first();
+        const plus = row.locator("button", { hasText: "+" });
+        assert.ok(await plus.isEnabled(), "4th purchase allowed");
+        await plus.click(); await pause(app.frame);
+        assert.ok(!(await plus.isEnabled()), "no 5th purchase");
+      }));
+
+      test("Monk: old Energy tiers move to 18/18 and old-only skills stay for owners", () => withApp(T, [
+        char({ name: "Old Monk", playerName: "Olga", classId: "monk", earnedSP: 150, purchasedSkills: [skill("monk_energy_1", 16), skill("monk_energy_2", 16), skill("monk_energy_3", 4), skill("monk_parry"), skill("monk_focus_1")] }),
+        char({ name: "New Monk", playerName: "Nico", classId: "monk", earnedSP: 150 }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Olga");
+        assert.equal(await unspent(app), 200 - (18 + 36 + 4 + 20));
+        let t = await text(app.frame);
+        assert.match(t, /Parry/); assert.match(t, /High Block/);
+        await back(app); await openCharacter(app, "Nico");
+        t = await text(app.frame);
+        assert.doesNotMatch(t, /Parry|Riposte|Focus \+4/); assert.match(t, /High Block/); assert.match(t, /Energy \(1–18\)/);
+      }));
+
+      test("Graystalkers Rank 3 discount lowers the chosen skill", () => withApp(T, [
+        char({ name: "Gray", playerName: "Gil", classId: "rogue", attChoices: { graystalkers: { discount: "Chemistry" } }, favorLog: [favor(1, 20)],
+          purchasedSkills: [skill("attunement", 1, "Graystalkers"), skill("chemistry", 4), skill("chemistry_5")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Gil");
+        assert.equal(await unspent(app), 150 - (10 + 12 + 6));
+      }));
+    });
+
+    // ---------------- Class / profession skill lists ----------------
+    describe("skill lists", () => {
+      const listFor = async (app, who, label) => { await openCharacter(app, who); await tab(app, label); return text(app.frame); };
+      test("Rogue: Exhausting Attack and Sap at 4 SP", () => withApp(T, [char({ playerName: "Rae", classId: "rogue" })], {}, async (app) => {
+        const t = await listFor(app, "Rae", "Rogue Skills");
+        assert.match(t, /Exhausting Attack/); assert.doesNotMatch(t, /Crippling Attack/);
+        assert.match(t, /Sap\s*4 SP/);
+      }));
+      test("Paladin: Strength of Conviction 3 SP and Chain Spell", () => withApp(T, [char({ playerName: "Pal", classId: "paladin" })], {}, async (app) => {
+        const t = await listFor(app, "Pal", "Paladin Skills");
+        assert.match(t, /Strength of Conviction\s*3 SP/); assert.match(t, /Chain Spell \(1–2\)/);
+      }));
+      test("Caller: Mana past 100 capped at 120", () => withApp(T, [char({ playerName: "Cal", classId: "caller" })], {}, async (app) => {
+        const t = await listFor(app, "Cal", "Caller Skills");
+        assert.match(t, /Mana \(101–120\)/);
+      }));
+      test("Everyman has Major Harvesting and no attunement dropdown", () => withApp(T, [char({ playerName: "Eve" })], {}, async (app) => {
+        const t = await listFor(app, "Eve", "Everyman Skills");
+        assert.match(t, /Major/);
+        assert.equal(await app.frame.locator('select:has(option:text("— Select attunement —"))').count(), 0);
+      }));
+      test("Professions tab shows count; Background tab has no professions", () => withApp(T, [char({ playerName: "Pro", background: "Nomad" })], {}, async (app) => {
+        await openCharacter(app, "Pro");
+        assert.match(await text(app.frame), /Professions \(0\/3\)/);
+        await tab(app, "Background");
+        assert.doesNotMatch(await text(app.frame), /Officer Rank/);
+      }));
+    });
+
+    // ---------------- Attunements ----------------
+    describe("attunements", () => {
+      test("dropdown lists all 39 attunements plus Other", () => withApp(T, [char({ playerName: "Ada", purchasedSkills: [skill("attunement", 1, "")] })], {}, async (app) => {
+        await openCharacter(app, "Ada"); await tab(app, "Attunement");
+        const opts = await app.frame.locator('select:has(option:text("— Select attunement —"))').first().locator("option").allTextContents();
+        assert.equal(opts.length, 1 + 39 + 1, opts.join(","));
+        for (const n of ["Iron Stars", "Preserver of the Spirit", "Graystalkers", "Other"]) assert.ok(opts.includes(n), n);
+        assert.ok(!opts.includes("Gunmage") && !opts.includes("Psionics"));
+      }));
+
+      test("old labels and nicknames map to the right attunement", () => withApp(T, [
+        char({ playerName: "Ari", purchasedSkills: [skill("attunement", 1, "Argynt Stars"), skill("second_attunement", 1, "Corhite Adept (Player Version)")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Ari"); await tab(app, "Attunement");
+        const t = await text(app.frame);
+        assert.match(t, /Iron Stars/); assert.match(t, /Corhite Adept/);
+      }));
+
+      test("rank comes from Favor (10 Favor = Rank 3) and higher ranks are greyed", () => withApp(T, [
+        char({ playerName: "Ren", favorLog: [favor(1, 10)], purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Ren"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Rank 3 · Novice · Favor 10/);
+        const greyed = await app.frame.locator("div.opacity-40").count();
+        assert.equal(greyed, 7 + 1, "ranks 4-10 plus Special greyed");
+      }));
+
+      test("rank choices save, and one-per-group picks hide used options", () => withApp(T, [
+        char({ name: "Corhite", playerName: "Cory", favorLog: [favor(1, 45)], purchasedSkills: [skill("attunement", 1, "Corhite Adept")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Cory"); await tab(app, "Attunement");
+        const sel = app.frame.locator('select:has(option:text("— Choose —"))');
+        await sel.nth(0).selectOption("Orange Healing"); await pause(app.frame);
+        const second = await sel.nth(1).locator("option").allTextContents();
+        assert.ok(!second.some((o) => o.startsWith("Orange Healing")), "already used");
+        await save(app);
+        assert.deepEqual((await stored(app, "Corhite")).attChoices, { "corhite adept": { spec1: "Orange Healing" } });
+      }));
+
+      test("Specials are free text, greyed below 75 Favor, and print", () => withApp(T, [
+        char({ name: "Lacuna", playerName: "Lux", favorLog: [favor(1, 80)], purchasedSkills: [skill("attunement", 1, "Lacuna Society")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Lux"); await tab(app, "Attunement");
+        const box = app.frame.locator('textarea[placeholder^="Negotiated"]');
+        assert.equal(await box.evaluate((el) => el.closest("div.flex.gap-3").className.includes("opacity-40")), false);
+        await box.fill("The Unasked Question 1/event"); await pause(app.frame, 200); await save(app);
+        const sheet = await printSheet(app);
+        assert.match(sheet.text, /Special - The Unasked Question 1\/event/);
+      }));
+
+      test("Collectors companions: slots by rank and per-reset circles", () => withApp(T, [
+        char({ name: "Menagerie", playerName: "Mel", favorLog: [favor(1, 25)], purchasedSkills: [skill("attunement", 1, "Collectors of Meliniter's Menagerie")],
+          companions: [{ name: "Bramble", cat: "Cycle", abil: [{ a: "Wound Closure", l: 2 }, { a: "Purifying Aura", l: 1 }] }] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Mel"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /3 companions, 2 abilities each/);
+        const sheet = await printSheet(app);
+        assert.match(sheet.text, /Companion 1: Bramble - Cycle - Wound Closure Level 2/);
+        assert.equal(await circles(sheet, "Regeneration"), 2);
+        assert.equal(await circles(sheet, "Resist Toxin"), 1);
+      }));
+
+      test("circle counts scale with rank and picks (Spellsingers Slinger)", () => withApp(T, [
+        char({ name: "Singer", playerName: "Sia", favorLog: [favor(1, 50)], attChoices: { spellsingers: { paragon: "Slinger" } }, purchasedSkills: [skill("attunement", 1, "Spellsingers")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Sia");
+        const sheet = await printSheet(app);
+        assert.equal(await circles(sheet, "Voice Magic Silence"), 3);
+        assert.equal(await circles(sheet, "Planar Asylum"), 2);
+        assert.equal(await circles(sheet, "Voice All Allies Heroism"), 2);
+      }));
+
+      test("Knights of Celiene adds Body; Ley Mage adds 25 Spell Pool", () => withApp(T, [
+        char({ name: "Plain", playerName: "Pia", classId: "mage", purchasedSkills: [skill("mage_pool_1")] }),
+        char({ name: "Knightly", playerName: "Kit", classId: "mage", favorLog: [favor(1, 15), favor(2, 40)], purchasedSkills: [skill("mage_pool_1"), skill("attunement", 1, "Knights of Celiene"), skill("second_attunement", 1, "Ley Mage")] }),
+      ], {}, async (app) => {
+        const read = async (who) => { await openCharacter(app, who, { edit: false }); const s = await printSheet(app); await s.page.close(); await back(app); return s.text; };
+        const a = await read("Pia"), b = await read("Kit");
+        const bp = (t) => Number((t.match(/Body Points:?\s*(\d+)/) || [])[1]);
+        const pool = (t) => Number((t.match(/Pool: (\d+)/) || [])[1]);
+        assert.equal(bp(b) - bp(a), 4, "Knights rank 4 = +4 Body");
+        assert.equal(pool(b) - pool(a), 25, "Ley Mage rank 9 Pool Infusion");
+      }));
+    });
+
+    // ---------------- Printed sheet ----------------
+    describe("printed sheet", () => {
+      test("layout: attunements side by side, narrow Checkout, no Tickets, resets never split", () => withApp(T, [
+        char({ name: "Printer", playerName: "Pri", classId: "mage", favorLog: [favor(1, 20), favor(2, 20)], checkout: { membership: true },
+          purchasedSkills: [skill("attunement", 1, "Reaper"), skill("second_attunement", 1, "Riverwalkers"), skill("mage_pool_1")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Pri", { edit: false });
+        const s = await printSheet(app);
+        assert.match(s.text, /Printer/);
+        assert.doesNotMatch(s.text, /Tickets Available/);
+        assert.match(s.text, /Checkout/);
+        const boxes = await s.page.evaluate(() => [...document.querySelectorAll("div")].filter((d) => d.style.flex === "0 0 2.75in").map((d) => Math.round(d.getBoundingClientRect().top)));
+        assert.equal(boxes.length, 2); assert.equal(boxes[0], boxes[1], "attunement boxes on one row");
+        assert.ok(s.html.includes("flex:0 0 1.75in"), "narrow Checkout");
+        assert.equal((s.html.match(/break-inside:avoid;page-break-inside:avoid;/g) || []).length >= 2, true, "resets kept whole");
+        assert.match(s.html, /display:inline-flex/, "trackers flow side by side");
+      }));
+    });
+
+    // ---------------- Analytics ----------------
+    describe("analytics", () => {
+      test("Popular Powers by class shows % of characters and % of picks", () => withApp(T, [
+        char({ playerName: "A1", classId: "mage", purchasedPowers: [{ slotIndex: 0, customName: "Spell Focus I" }, { slotIndex: 1, customName: "Mentor" }] }),
+        char({ playerName: "A2", classId: "mage", purchasedPowers: [{ slotIndex: 0, customName: "Spell Focus I" }] }),
+        char({ playerName: "A3", classId: "warrior", purchasedPowers: [{ slotIndex: 0, customName: "Mentor" }] }),
+      ], {}, async (app) => {
+        await app.frame.locator("button", { hasText: "Analytics" }).first().click(); await pause(app.frame, 300);
+        const box = app.frame.locator("div.rounded-xl").filter({ hasText: "Popular Powers" }).last();
+        await box.locator("button", { hasText: "By Class" }).click(); await pause(app.frame);
+        await box.locator("select").selectOption({ label: "Mage (2)" }); await pause(app.frame);
+        let t = await box.innerText();
+        assert.match(t, /Spell Focus I[\s\S]*?100%[\s\S]*?2 of 2/);
+        await box.locator("button", { hasText: "% of all power picks" }).click(); await pause(app.frame);
+        t = await box.innerText();
+        assert.match(t, /Spell Focus I[\s\S]*?67%[\s\S]*?2 of 3/);
+      }));
+    });
+  });
+}

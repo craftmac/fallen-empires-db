@@ -1,0 +1,11 @@
+{
+  "name": "fallen-empires-db",
+  "private": true,
+  "description": "TFE Character Database",
+  "scripts": {
+    "qa:check": "./qa check"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}
