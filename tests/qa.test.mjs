@@ -155,6 +155,43 @@ for (const T of TARGETS) {
         assert.equal(await unspent(app), 150 - (10 + 15), "already-correct Scholar unchanged");
       }));
 
+      test("Scholar Knowledge: six areas max, Rank 5 each, common and species areas only", () => withApp(T, [
+        char({ name: "Six Areas", playerName: "Sal", classId: "mage", background: "Scholar", earnedSP: 200,
+          purchasedSkills: ["Astronomy", "Cycle", "History", "Magic", "Nature", "Planes"].map((a, k) => skill("bg_scholar_knowledge_discount", k === 0 ? 5 : 1, a)) }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Sal"); await tab(app, "Background");
+        const before = await unspent(app);
+        const add = app.frame.locator("button", { hasText: /Knowledge \(Area\) \(Scholar or Warlock\)/ }).filter({ hasText: "+" }).last();
+        assert.ok(await add.isDisabled(), "no seventh area");
+        const rowOf = (lbl) => app.frame.locator('select:has(option:text("— Choose a common knowledge —"))').filter({ has: app.frame.locator(`option[value="${lbl}"]:checked`) });
+        const astro = app.frame.locator("select").filter({ hasText: "— Choose a common knowledge —" }).first();
+        const opts = await astro.locator("option").allTextContents();
+        for (const o of ["Planar Cartography", "Warfare", "High Elf", "Barrows"]) assert.ok(opts.some((x) => x.startsWith(o)), o);
+        for (const o of ["Essence", "Titans", "Acheron", "Abyss", "Old Gods"]) assert.ok(!opts.some((x) => x.startsWith(o)), "rare " + o);
+        assert.ok(opts.includes("Cycle (already favored)"), "other chosen areas are disabled");
+        await astro.locator("xpath=ancestor::div[.//button][1]").locator("button", { hasText: "+" }).first().click(); await pause(app.frame);
+        assert.equal(await unspent(app), before, "Astronomy already at Rank 5");
+      }));
+
+      test("Loremaster Ancient Lore: 3 favored Knowledges at Rank 5, 6 at Rank 10, never the Scholar's", () => withApp(T, [
+        char({ name: "Lore Five", playerName: "Lou", classId: "mage", background: "Scholar", earnedSP: 200, favorLog: [favor(1, 20)],
+          purchasedSkills: [skill("attunement", 1, "Loremaster"), skill("bg_scholar_knowledge_discount", 2, "Magic"), skill("lore_know", 3, "History")] }),
+        char({ name: "Lore Ten", playerName: "Lia", classId: "warlock", earnedSP: 200, favorLog: [favor(1, 45)], purchasedSkills: [skill("attunement", 1, "Loremaster")] }),
+        char({ name: "Lore Two", playerName: "Leo", classId: "mage", earnedSP: 200, favorLog: [favor(1, 5)], purchasedSkills: [skill("attunement", 1, "Loremaster")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Lou");
+        assert.equal(await unspent(app), 250 - (10 + 4 + 6), "Scholar Magic 2x2, Loremaster History 3x2");
+        await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Ancient Lore - Favored Knowledges \(1\/3\)/);
+        const sel = app.frame.locator("select").filter({ hasText: "— Choose a common knowledge —" }).first();
+        assert.ok((await sel.locator("option").allTextContents()).includes("Magic (already favored)"), "Scholar's Magic cannot be Lore-favored");
+        await back(app); await openCharacter(app, "Lia"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Ancient Lore - Favored Knowledges \(0\/6\)/);
+        assert.match(await text(app.frame), /Loremaster Favored and Warlock/);
+        await back(app); await openCharacter(app, "Leo"); await tab(app, "Attunement");
+        assert.doesNotMatch(await text(app.frame), /Ancient Lore - Favored/);
+      }));
+
       test("Graystalkers Rank 3 discount lowers the chosen skill", () => withApp(T, [
         char({ name: "Gray", playerName: "Gil", classId: "rogue", attChoices: { graystalkers: { discount: "Chemistry" } }, favorLog: [favor(1, 20)],
           purchasedSkills: [skill("attunement", 1, "Graystalkers"), skill("chemistry", 4), skill("chemistry_5")] }),
