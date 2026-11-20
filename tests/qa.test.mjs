@@ -173,6 +173,24 @@ for (const T of TARGETS) {
         assert.equal(await unspent(app), before, "Astronomy already at Rank 5");
       }));
 
+      test("custom common Knowledge (Other) works on Everyman and Scholar Background", () => withApp(T, [
+        char({ name: "Myranda", playerName: "Myra", classId: "mage", background: "Scholar", earnedSP: 100,
+          purchasedSkills: [skill("knowledge_area", 2, "Frogs"), skill("bg_scholar_knowledge_discount", 1, "")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Myra");
+        assert.equal(await unspent(app), 150 - (6 + 2));
+        await tab(app, "Everyman Skills");
+        const frogs = app.frame.locator('input[placeholder^="Custom common knowledge"]');
+        assert.equal(await frogs.first().inputValue(), "Frogs", "existing custom label shown as Other");
+        await tab(app, "Background");
+        const sel = app.frame.locator("select").filter({ hasText: "— Choose a common knowledge —" }).first();
+        await sel.selectOption("__other"); await pause(app.frame);
+        await app.frame.locator('input[placeholder^="Custom common knowledge"]').first().fill("Toads"); await pause(app.frame, 200);
+        await save(app);
+        const sk = (await stored(app, "Myranda")).purchasedSkills.map((p) => `${p.skillId}:${p.label}`).sort();
+        assert.deepEqual(sk, ["bg_scholar_knowledge_discount:Toads", "knowledge_area:Frogs"]);
+      }));
+
       test("Loremaster Ancient Lore: 3 favored Knowledges at Rank 5, 6 at Rank 10, never the Scholar's", () => withApp(T, [
         char({ name: "Lore Five", playerName: "Lou", classId: "mage", background: "Scholar", earnedSP: 200, favorLog: [favor(1, 20)],
           purchasedSkills: [skill("attunement", 1, "Loremaster"), skill("bg_scholar_knowledge_discount", 2, "Magic"), skill("lore_know", 3, "History")] }),
