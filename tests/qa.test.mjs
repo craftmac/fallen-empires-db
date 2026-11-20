@@ -141,6 +141,20 @@ for (const T of TARGETS) {
         assert.doesNotMatch(t, /Parry|Riposte|Focus \+4/); assert.match(t, /High Block/); assert.match(t, /Energy \(1–18\)/);
       }));
 
+      test("Scholars' base common Knowledges move to the Background tab at 2 SP; rare and species stay", () => withApp(T, [
+        char({ name: "Scholarly", playerName: "Sky", classId: "mage", background: "Scholar", earnedSP: 100,
+          purchasedSkills: [skill("knowledge_area", 5, "Magic"), skill("knowledge_area", 2, "Planes"), skill("knowledge_area", 5, "Essence"), skill("knowledge_area", 1, "Barrowman"), skill("knowledge_area_rare", 3, "Acheron")] }),
+        char({ name: "Already Right", playerName: "Ace", classId: "champion", background: "Scholar",
+          purchasedSkills: [skill("bg_scholar_knowledge_discount", 5, "Warfare"), skill("knowledge_area_rare", 5, "Acheron")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Sky");
+        assert.equal(await unspent(app), 150 - (7 * 2 + 5 * 3 + 1 * 3 + 3 * 3), "Magic+Planes at 2 SP, Essence/Barrowman/Acheron at 3");
+        const sk = (await stored(app, "Scholarly")).purchasedSkills.map((p) => `${p.skillId}:${p.label}:${p.timesPurchased}`).sort();
+        if (T.name === "hub") assert.deepEqual(sk, ["bg_scholar_knowledge_discount:Magic:5", "bg_scholar_knowledge_discount:Planes:2", "knowledge_area:Barrowman:1", "knowledge_area:Essence:5", "knowledge_area_rare:Acheron:3"], "saved to Base44");
+        await back(app); await openCharacter(app, "Ace");
+        assert.equal(await unspent(app), 150 - (10 + 15), "already-correct Scholar unchanged");
+      }));
+
       test("Graystalkers Rank 3 discount lowers the chosen skill", () => withApp(T, [
         char({ name: "Gray", playerName: "Gil", classId: "rogue", attChoices: { graystalkers: { discount: "Chemistry" } }, favorLog: [favor(1, 20)],
           purchasedSkills: [skill("attunement", 1, "Graystalkers"), skill("chemistry", 4), skill("chemistry_5")] }),
