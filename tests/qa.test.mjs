@@ -210,6 +210,26 @@ for (const T of TARGETS) {
         assert.doesNotMatch(await text(app.frame), /Ancient Lore - Favored/);
       }));
 
+      test("Goblins pay double for Read and Write; Ogres pay +1 for Read and Write and Knowledge; free skills stay free", () => withApp(T, [
+        char({ name: "Gob", playerName: "Gabe", species: "Goblin", earnedSP: 100,
+          purchasedSkills: [skill("read_and_write", 1, "Elvish"), skill("knowledge_area", 2, "Nature"), skill("sp_know_goblin_free")] }),
+        char({ name: "Ogg", playerName: "Ozzy", species: "Ogre", earnedSP: 100,
+          purchasedSkills: [skill("read_and_write", 1, "Dwarven"), skill("knowledge_area", 2, "Warfare"), skill("sp_know_ogre_free"), skill("sp_know_ogre", 1)] }),
+        char({ name: "Hum", playerName: "Hal", species: "Human", earnedSP: 100,
+          purchasedSkills: [skill("read_and_write", 1, "Elvish"), skill("knowledge_area", 2, "Nature")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Gabe");
+        assert.equal(await unspent(app), 150 - (6 + 6), "Read and Write 3x2, Knowledge normal");
+        await back(app); await openCharacter(app, "Ozzy");
+        assert.equal(await unspent(app), 150 - (4 + 8 + 0 + 4), "+1 on Read and Write and each Knowledge rank; free Knowledge stays 0");
+        await back(app); await openCharacter(app, "Hal");
+        assert.equal(await unspent(app), 150 - (3 + 6));
+        for (const who of ["Gabe", "Ozzy"]) {
+          await back(app); await openCharacter(app, who); await tab(app, "Everyman Skills");
+          assert.match(await text(app.frame), /Read and Write \(Common\) — Free\s*0 SP/, who + " keeps free Read and Write (Common)");
+        }
+      }));
+
       test("Graystalkers Rank 3 discount lowers the chosen skill", () => withApp(T, [
         char({ name: "Gray", playerName: "Gil", classId: "rogue", attChoices: { graystalkers: { discount: "Chemistry" } }, favorLog: [favor(1, 20)],
           purchasedSkills: [skill("attunement", 1, "Graystalkers"), skill("chemistry", 4), skill("chemistry_5")] }),
