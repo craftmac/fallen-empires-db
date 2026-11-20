@@ -67,13 +67,29 @@ for (const T of TARGETS) {
       }));
 
       if (T.name === "hub") {
+        test("admin email on the main screen opens the GM view; no Google button", () => withApp(T, [
+          char({ name: "Alpha", playerName: "Ann", playerEmail: "ann@example.com" }), char({ name: "Bravo", playerName: "Ben" }),
+        ], { role: "player", email: "" }, async (app) => {
+          const f = app.frame;
+          assert.equal(await f.locator("text=GM sign in with Google").count(), 0);
+          await f.fill("#tfe-login-email", " FallenEmpiresLLC@gmail.com "); await f.click("button[type=submit]"); await pause(f, 500);
+          const t = await text(f);
+          assert.match(t, /Alpha/); assert.match(t, /Bravo/); assert.match(t, /GM · fallenempiresllc@gmail.com/);
+          await openCharacter(app, "Ben");
+          assert.ok(await f.locator("button", { hasText: /^Save/ }).count(), "GM editor available");
+          await back(app);
+          await f.locator("button", { hasText: /Sign out/ }).first().click(); await pause(f, 300);
+          assert.ok(await f.locator("#tfe-login-email").count(), "back at the login screen");
+        }));
+      }
+      if (T.name === "hub") {
         test("player email login: unknown email is refused, case does not matter, Notes save", () => withApp(T, [
           char({ name: "Seraphine", playerName: "Jess", playerEmail: "jess@example.com" }),
         ], { role: "player", email: "" }, async (app) => {
           const f = app.frame;
-          await f.fill("#tfe-login-email", "nobody@example.com"); await f.click("text=View my characters"); await pause(f, 300);
+          await f.fill("#tfe-login-email", "nobody@example.com"); await f.click("button[type=submit]"); await pause(f, 300);
           assert.ok((await f.locator("#tfe-login-error").innerText()).length > 0);
-          await f.fill("#tfe-login-email", " JESS@Example.com "); await f.click("text=View my characters"); await pause(f, 400);
+          await f.fill("#tfe-login-email", " JESS@Example.com "); await f.click("button[type=submit]"); await pause(f, 400);
           await openCharacter(app, "Seraphine", { edit: false });
           await f.fill("#tfe-player-notes", "Missed last event"); await f.click("text=Save notes"); await pause(f, 300);
           assert.equal((await stored(app, "Seraphine")).notes, "Missed last event");
