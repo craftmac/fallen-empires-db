@@ -43,6 +43,8 @@ const clone = (x) => JSON.parse(JSON.stringify(x));
 window.tfeBridge = {
   async me() { return fx.role === "gm" ? { email: "${GM_EMAIL_HUB}", isGM: true } : null; },
   gmSignIn() {}, gmSignOut() {},
+  async adminSignIn(email) { const ok = norm(email) === "fallenempiresllc@gmail.com"; window.__admin = ok; return ok; },
+  adminSignOut() { window.__admin = false; }, isAdminSession() { return !!window.__admin; },
   async gmList() { __calls.push("gmList"); return clone(store.rows).map(fromRecord); },
   async gmSave(c) { __calls.push("gmSave:" + c.name); const d = toRecord(c); let r; if (c.__rid) { r = store.rows.find((x) => x.id === c.__rid); Object.assign(r, d); } else { r = { id: "r" + store.n++, ...d }; store.rows.push(r); } persist(); return fromRecord(clone(r)); },
   async gmSeed() { __calls.push("gmSeed"); return { seeded: 0 }; },
