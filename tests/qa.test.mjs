@@ -341,47 +341,6 @@ for (const T of TARGETS) {
         assert.ok(!opts.includes("Psionics"));
       }));
 
-      test("Gunmage: rank-unlocked purchases count against SP, 10 free Joules, dailies print one circle per purchase", () => withApp(T, [
-        char({ name: "Spellshot", playerName: "Gus", classId: "gunslinger", species: "Human", earnedSP: 100, favorLog: [favor(1, 20)], purchasedSkills: [skill("attunement", 1, "101st MC(A)")] }),
-      ], {}, async (app) => {
-        await openCharacter(app, "Gus"); await tab(app, "Attunement");
-        let t = await text(app.frame);
-        assert.match(t, /Gunmage \(101st MC\(A\)\)/); assert.match(t, /Rank 5 · Journeyman · Favor 20/);
-        assert.match(t, /Joules: 10 \(10 free \+ 0 bought\)/);
-        assert.doesNotMatch(t, /Gunmage requires/);
-        const before = await unspent(app);
-        const row = (name) => app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: name }).first();
-        const plus = (name) => row(name).locator("button", { hasText: "+" });
-        for (let k = 0; k < 4; k++) { await plus("Gunmage Joules (11–50)").click(); await pause(app.frame, 60); }
-        await plus("Gunmage Accuracy +1").click(); await pause(app.frame);
-        await plus("Gunmage Accuracy +2").click(); await pause(app.frame);
-        await plus("Gunmage Conservation").click(); await pause(app.frame, 60);
-        await plus("Gunmage Conservation").click(); await pause(app.frame);
-        assert.equal(await unspent(app), before - (4 * 0.5 + 20 + 20 + 2 * 2));
-        assert.match(await text(app.frame), /Joules: 14 \(10 free \+ 4 bought\)/);
-        // Rank 5 unlocks Joules 51-75 only after 11-50 is full; Accuracy +3 needs Rank 6; Truesight Rank 10.
-        assert.equal(await plus("Gunmage Accuracy +3").isDisabled(), true);
-        assert.equal(await plus("Gunmage Truesight").isDisabled(), true);
-        assert.equal(await plus("Gunmage Joules (51–75)").isDisabled(), true);
-        await save(app);
-        const sheet = await printSheet(app);
-        assert.match(sheet.text, /Joules: 14/);
-        assert.match(sheet.text, /Rank 1 - Ballistic Magic; 10 Joules; Friendly Fire scroll/);
-        assert.match(sheet.text, /Gunmage Accuracy \+2/);
-        assert.equal(await circles(sheet, "Conservation"), 2);
-      }));
-
-      test("Gunmage: warning for non-Human or wrong class; locked at Rank 1", () => withApp(T, [
-        char({ name: "Elfshot", playerName: "Elle", classId: "warrior", species: "Forest Elf", favorLog: [], purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
-      ], {}, async (app) => {
-        await openCharacter(app, "Elle"); await tab(app, "Attunement");
-        const t = await text(app.frame);
-        assert.match(t, /Gunmage requires a Human Mage or Gunslinger/);
-        assert.match(t, /Gunmage Purchases \(Rank 1\)/);
-        const plus = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: "Gunmage Conservation" }).first().locator("button", { hasText: "+" });
-        assert.equal(await plus.isDisabled(), true);
-      }));
-
       test("old labels and nicknames map to the right attunement", () => withApp(T, [
         char({ playerName: "Ari", purchasedSkills: [skill("attunement", 1, "Argynt Stars"), skill("second_attunement", 1, "Corhite Adept (Player Version)")] }),
       ], {}, async (app) => {
@@ -454,6 +413,168 @@ for (const T of TARGETS) {
         const pool = (t) => Number((t.match(/Pool: (\d+)/) || [])[1]);
         assert.equal(bp(b) - bp(a), 4, "Knights rank 4 = +4 Body");
         assert.equal(pool(b) - pool(a), 25, "Ley Mage rank 9 Pool Infusion");
+      }));
+    });
+
+    // ---------------- Gunmage (101st MC(A)) ----------------
+    // Ranks unlock SP purchases instead of granting abilities. Likely break points:
+    // Joule pricing and totals, rank gates from Favor, the 51-75 band, prerequisite
+    // chains, SP totals, the second slot, rank loss, and the printed sheet.
+    describe("gunmage", () => {
+      const gunRow = (app, name) => app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: name }).first();
+      const plus = (app, name) => gunRow(app, name).locator("button", { hasText: "+" });
+      const minus = (app, name) => gunRow(app, name).locator("button", { hasText: "−" });
+      const gm = (over = {}) => char({ classId: "gunslinger", species: "Human", earnedSP: 200, ...over });
+
+      test("names and nicknames all select Gunmage", () => withApp(T, [
+        gm({ playerName: "ZqNic1", purchasedSkills: [skill("attunement", 1, "101st MC(A)")] }),
+        gm({ playerName: "ZqNic2", purchasedSkills: [skill("attunement", 1, "Spellshot")] }),
+        gm({ playerName: "ZqNic3", purchasedSkills: [skill("attunement", 1, "gun mage")] }),
+      ], {}, async (app) => {
+        for (const who of ["ZqNic1", "ZqNic2", "ZqNic3"]) {
+          await openCharacter(app, who); await tab(app, "Attunement");
+          assert.match(await text(app.frame), /Gunmage Purchases \(Rank 1\)/, who);
+          await back(app);
+        }
+      }));
+
+      test("Joules 11-50: 1 SP buys 2 Joules, capped at 20 purchases (50 Joules)", () => withApp(T, [
+        gm({ playerName: "ZqJo", favorLog: [favor(1, 0)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 19)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqJo"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Joules: 48 \(10 free \+ 38 bought\)/);
+        const before = await unspent(app);
+        await plus(app, "Gunmage Joules (11–50)").click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - 1, "one purchase = 1 SP");
+        assert.match(await text(app.frame), /Joules: 50 \(10 free \+ 40 bought\)/);
+        assert.equal(await plus(app, "Gunmage Joules (11–50)").isDisabled(), true, "no Joule 51 from the cheap band");
+      }));
+
+      test("Joules 51-75 need Rank 5 AND a full 11-50 band; 2 SP each; 75 max", () => withApp(T, [
+        gm({ playerName: "ZqR4full", favorLog: [favor(1, 15)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 20)] }),
+        gm({ playerName: "ZqR5part", favorLog: [favor(1, 20)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 19)] }),
+        gm({ playerName: "ZqR5full", favorLog: [favor(1, 20)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 20), skill("gm_joules_2", 24)] }),
+      ], {}, async (app) => {
+        const band = "Gunmage Joules (51–75)";
+        await openCharacter(app, "ZqR4full"); await tab(app, "Attunement");
+        assert.equal(await plus(app, band).isDisabled(), true, "Rank 4 is too low"); await back(app);
+        await openCharacter(app, "ZqR5part"); await tab(app, "Attunement");
+        assert.equal(await plus(app, band).isDisabled(), true, "11-50 not full"); await back(app);
+        await openCharacter(app, "ZqR5full"); await tab(app, "Attunement");
+        const before = await unspent(app);
+        await plus(app, band).click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - 2);
+        assert.match(await text(app.frame), /Joules: 75 \(10 free \+ 65 bought\)/);
+        assert.equal(await plus(app, band).isDisabled(), true, "75 is the cap");
+      }));
+
+      test("unspent SP counts Gunmage purchases already on the sheet", () => withApp(T, [
+        gm({ playerName: "ZqSum", earnedSP: 100, favorLog: [favor(1, 50)], purchasedSkills: [
+          skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 20), skill("gm_joules_2", 5), skill("gm_acc_1"), skill("gm_acc_2"), skill("gm_acc_3"),
+          skill("gm_conservation", 2), skill("gm_forced_return", 1), skill("gm_consume"), skill("gm_truesight", 3)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqSum");
+        // 150 - attunement 10 - joules 20 - 10 - accuracy 60 - conservation 4 - forced return 3 - consume 5 - truesight 15
+        assert.equal(await unspent(app), 150 - 10 - 20 - 10 - 60 - 4 - 3 - 5 - 15);
+      }));
+
+      test("each unlock opens at its rank and not before", () => withApp(T, [
+        gm({ playerName: "ZqLo", favorLog: [favor(1, 4)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_conservation"), skill("gm_acc_1"), skill("gm_acc_2")] }),
+        gm({ playerName: "ZqHi", favorLog: [favor(1, 45)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_conservation"), skill("gm_acc_1"), skill("gm_acc_2")] }),
+      ], {}, async (app) => {
+        const items = ["Gunmage Accuracy +3", "Gunmage Forced Return", "Gunmage Consume", "Gunmage Truesight"];
+        await openCharacter(app, "ZqLo"); await tab(app, "Attunement");
+        for (const n of items) assert.equal(await plus(app, n).isDisabled(), true, `${n} locked at Rank 1`);
+        await back(app);
+        await openCharacter(app, "ZqHi"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Rank 10 · Adept · Favor 45/);
+        for (const n of items) assert.equal(await plus(app, n).isDisabled(), false, `${n} open at Rank 10`);
+      }));
+
+      test("prerequisite chains: Accuracy in order; Conservation can't be removed under Forced Return", () => withApp(T, [
+        gm({ playerName: "ZqChain", favorLog: [favor(1, 25)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_conservation"), skill("gm_forced_return")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqChain"); await tab(app, "Attunement");
+        assert.equal(await plus(app, "Gunmage Accuracy +2").isDisabled(), true, "+2 needs +1");
+        assert.equal(await minus(app, "Gunmage Conservation").isDisabled(), true, "Forced Return needs it");
+        await plus(app, "Gunmage Accuracy +1").click(); await pause(app.frame);
+        assert.equal(await plus(app, "Gunmage Accuracy +2").isDisabled(), false);
+      }));
+
+      test("Gunmage Accuracy does not count toward Gunslinger Accuracy", () => withApp(T, [
+        gm({ playerName: "ZqSep", favorLog: [favor(1, 0)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_acc_1")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqSep"); await tab(app, "Gunslinger Skills");
+        const row = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: /^Accuracy \+2/ }).first();
+        assert.equal(await row.locator("button", { hasText: "+" }).isDisabled(), true, "class Accuracy +2 still needs class Accuracy +1");
+      }));
+
+      test("second attunement slot uses its own Favor", () => withApp(T, [
+        gm({ playerName: "ZqTwo", favorLog: [favor(1, 45), favor(2, 5)], purchasedSkills: [skill("attunement", 1, "Reaper"), skill("second_attunement", 1, "Gunmage")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqTwo"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Gunmage Purchases \(Rank 2\)/);
+        assert.equal(await plus(app, "Gunmage Conservation").isDisabled(), false);
+        assert.equal(await plus(app, "Gunmage Forced Return").isDisabled(), true, "Rank 3 needs 10 Favor in slot 2");
+      }));
+
+      test("entry warning: Human Mage and Human Gunslinger are fine; others warned but allowed", () => withApp(T, [
+        gm({ playerName: "ZqOkM", classId: "mage", purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
+        gm({ playerName: "ZqOkG", purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
+        gm({ playerName: "ZqElf", species: "Deep Elf", purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
+        gm({ playerName: "ZqWar", classId: "warrior", purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
+      ], {}, async (app) => {
+        for (const [who, warned] of [["ZqOkM", false], ["ZqOkG", false], ["ZqElf", true], ["ZqWar", true]]) {
+          await openCharacter(app, who); await tab(app, "Attunement");
+          const t = await text(app.frame);
+          assert.equal(/Gunmage requires a Human Mage or Gunslinger/.test(t), warned, who);
+          assert.match(t, /Gunmage Purchases/, `${who} can still buy`);
+          await back(app);
+        }
+      }));
+
+      test("losing rank keeps purchases and SP, and adds a prerequisite exception note", () => withApp(T, [
+        gm({ name: "Demoted", playerName: "ZqDem", favorLog: [favor(1, 0)], purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_truesight", 2)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqDem");
+        assert.equal(await unspent(app), 250 - 10 - 10, "purchases still charged");
+        const notes = await app.frame.evaluate(() => [...document.querySelectorAll("textarea")].map((t) => t.value).join("\n"));
+        assert.match(notes, /Prerequisite exception: Gunmage Truesight requires Gunmage Rank 10/);
+        await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Gunmage Truesight[\s\S]*×2/);
+      }));
+
+      test("non-Gunmage characters see no Gunmage purchases", () => withApp(T, [
+        gm({ playerName: "ZqRea", favorLog: [favor(1, 45)], purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqRea"); await tab(app, "Attunement");
+        const t = await text(app.frame);
+        assert.doesNotMatch(t, /Gunmage Purchases|Joules/);
+      }));
+
+      test("player view shows Gunmage purchases by name with their SP", () => withApp(T, [
+        gm({ name: "Spellshot", playerName: "ZqGus", playerEmail: "gus@example.com", favorLog: [favor(1, 50)], purchasedSkills: [
+          skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 4), skill("gm_acc_1")] }),
+      ], { role: "player", email: "gus@example.com" }, async (app) => {
+        await openCharacter(app, "Spellshot", { edit: false });
+        const v = await text(app.frame);
+        assert.match(v, /Gunmage Joules \(11–50\)\s*×4\s*4 SP/);
+        assert.match(v, /Gunmage Accuracy \+1\s*20 SP/);
+        assert.doesNotMatch(v, /Gm Joules|Gm Acc/, "no raw skill ids");
+      }));
+
+      test("printed sheet: Joules total, rank text, purchases, one circle per daily", () => withApp(T, [
+        gm({ name: "Printshot", playerName: "ZqPrn", favorLog: [favor(1, 50)], purchasedSkills: [
+          skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 4), skill("gm_acc_1"), skill("gm_conservation", 2), skill("gm_truesight", 3)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZqPrn", { edit: false });
+        const sheet = await printSheet(app);
+        assert.match(sheet.text, /Joules: 18/);
+        assert.match(sheet.text, /Rank 1 - Ballistic Magic; 10 Joules; Friendly Fire scroll/);
+        assert.match(sheet.text, /Rank 9 - Unlocks 5th level spells; Ward Shot scroll/);
+        assert.match(sheet.text, /Gunmage Accuracy \+1/);
+        assert.equal(await circles(sheet, "Conservation"), 2);
+        assert.equal(await circles(sheet, "Truesight"), 3);
       }));
     });
 
