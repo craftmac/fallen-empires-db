@@ -333,12 +333,53 @@ for (const T of TARGETS) {
 
     // ---------------- Attunements ----------------
     describe("attunements", () => {
-      test("dropdown lists all 39 attunements plus Other", () => withApp(T, [char({ playerName: "Ada", purchasedSkills: [skill("attunement", 1, "")] })], {}, async (app) => {
+      test("dropdown lists all 40 attunements plus Other", () => withApp(T, [char({ playerName: "Ada", purchasedSkills: [skill("attunement", 1, "")] })], {}, async (app) => {
         await openCharacter(app, "Ada"); await tab(app, "Attunement");
         const opts = await app.frame.locator('select:has(option:text("— Select attunement —"))').first().locator("option").allTextContents();
-        assert.equal(opts.length, 1 + 39 + 1, opts.join(","));
-        for (const n of ["Iron Stars", "Preserver of the Spirit", "Graystalkers", "Other"]) assert.ok(opts.includes(n), n);
-        assert.ok(!opts.includes("Gunmage") && !opts.includes("Psionics"));
+        assert.equal(opts.length, 1 + 40 + 1, opts.join(","));
+        for (const n of ["Iron Stars", "Preserver of the Spirit", "Graystalkers", "Gunmage (101st MC(A))", "Other"]) assert.ok(opts.includes(n), n);
+        assert.ok(!opts.includes("Psionics"));
+      }));
+
+      test("Gunmage: rank-unlocked purchases count against SP, 10 free Joules, dailies print one circle per purchase", () => withApp(T, [
+        char({ name: "Spellshot", playerName: "Gus", classId: "gunslinger", species: "Human", earnedSP: 100, favorLog: [favor(1, 20)], purchasedSkills: [skill("attunement", 1, "101st MC(A)")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Gus"); await tab(app, "Attunement");
+        let t = await text(app.frame);
+        assert.match(t, /Gunmage \(101st MC\(A\)\)/); assert.match(t, /Rank 5 · Journeyman · Favor 20/);
+        assert.match(t, /Joules: 10 \(10 free \+ 0 bought\)/);
+        assert.doesNotMatch(t, /Gunmage requires/);
+        const before = await unspent(app);
+        const row = (name) => app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: name }).first();
+        const plus = (name) => row(name).locator("button", { hasText: "+" });
+        for (let k = 0; k < 4; k++) { await plus("Gunmage Joules (11–50)").click(); await pause(app.frame, 60); }
+        await plus("Gunmage Accuracy +1").click(); await pause(app.frame);
+        await plus("Gunmage Accuracy +2").click(); await pause(app.frame);
+        await plus("Gunmage Conservation").click(); await pause(app.frame, 60);
+        await plus("Gunmage Conservation").click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - (4 * 0.5 + 20 + 20 + 2 * 2));
+        assert.match(await text(app.frame), /Joules: 14 \(10 free \+ 4 bought\)/);
+        // Rank 5 unlocks Joules 51-75 only after 11-50 is full; Accuracy +3 needs Rank 6; Truesight Rank 10.
+        assert.equal(await plus("Gunmage Accuracy +3").isDisabled(), true);
+        assert.equal(await plus("Gunmage Truesight").isDisabled(), true);
+        assert.equal(await plus("Gunmage Joules (51–75)").isDisabled(), true);
+        await save(app);
+        const sheet = await printSheet(app);
+        assert.match(sheet.text, /Joules: 14/);
+        assert.match(sheet.text, /Rank 1 - Ballistic Magic; 10 Joules; Friendly Fire scroll/);
+        assert.match(sheet.text, /Gunmage Accuracy \+2/);
+        assert.equal(await circles(sheet, "Conservation"), 2);
+      }));
+
+      test("Gunmage: warning for non-Human or wrong class; locked at Rank 1", () => withApp(T, [
+        char({ name: "Elfshot", playerName: "Elle", classId: "warrior", species: "Forest Elf", favorLog: [], purchasedSkills: [skill("attunement", 1, "Gunmage")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "Elle"); await tab(app, "Attunement");
+        const t = await text(app.frame);
+        assert.match(t, /Gunmage requires a Human Mage or Gunslinger/);
+        assert.match(t, /Gunmage Purchases \(Rank 1\)/);
+        const plus = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: "Gunmage Conservation" }).first().locator("button", { hasText: "+" });
+        assert.equal(await plus.isDisabled(), true);
       }));
 
       test("old labels and nicknames map to the right attunement", () => withApp(T, [
