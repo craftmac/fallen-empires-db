@@ -56,6 +56,18 @@ for (const T of TARGETS) {
         assert.doesNotMatch(await style("Ned"), /red|#ef4444/i);
       }));
 
+      test("notes starting with 'plot' get a blue outline instead of red", () => withApp(T, [
+        char({ name: "Plot A", playerName: "Paula", notes: "Plot: the duke owes her a favor" }),
+        char({ name: "Plot B", playerName: "Quinn", notes: "  PLOT hook for next event" }),
+        char({ name: "Not Plot", playerName: "Rita", notes: "Plotting a heist — check crowns" }),
+        char({ name: "Later Plot", playerName: "Sam", notes: "Owes crowns. Plot later." }),
+      ], {}, async (app) => {
+        const style = async (n) => (await app.frame.locator("button").filter({ hasText: n }).first().getAttribute("style")) || "";
+        const blue = /#3b82f6|rgb\(59, 130, 246\)/i, red = /#ef4444|rgb\(239, 68, 68\)/i;
+        for (const n of ["Paula", "Quinn"]) { assert.match(await style(n), blue); assert.doesNotMatch(await style(n), red); }
+        for (const n of ["Rita", "Sam"]) { assert.match(await style(n), red); assert.doesNotMatch(await style(n), blue); }
+      }));
+
       test("a player sees only their own characters and cannot edit them", () => withApp(T, [
         char({ name: "Mine", playerName: "Pat", playerEmail: "pat@example.com" }),
         char({ name: "Not Mine", playerName: "Quinn", playerEmail: "quinn@example.com" }),
