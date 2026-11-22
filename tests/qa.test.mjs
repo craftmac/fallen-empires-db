@@ -428,6 +428,97 @@ for (const T of TARGETS) {
       }));
     });
 
+    // ---------------- Zealous Dedication ----------------
+    // Heroic power. Prerequisite: a single attunement with 100+ Favor. Doubles
+    // every per-day circle and per-event use from that attunement, raises its
+    // pools (spell, healing, elemental, natural armor, Joules) by 50% rounded
+    // down to 5s, and leaves Ley Mage ley points and Max Body alone. Taking it
+    // locks out a Second Attunement.
+    describe("zealous dedication", () => {
+      const ZD = [{ slotIndex: 4, customName: "Zealous Dedication" }];
+      const hero = (over = {}) => char({ earnedSP: 400, favorLog: [favor(1, 100)], ...over });
+      const read = async (app, who) => { await openCharacter(app, who, { edit: false }); const s = await printSheet(app); await back(app); return s; };
+
+      test("doubles attunement circles and per-event uses; pools +50% rounded down to 5s", () => withApp(T, [
+        hero({ playerName: "ZdOn", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Verdant Protectors")] }),
+        hero({ playerName: "ZdOff", purchasedSkills: [skill("attunement", 1, "Verdant Protectors")] }),
+        hero({ playerName: "ZdLamp", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Lamplight Inquest")] }),
+      ], {}, async (app) => {
+        const off = await read(app, "ZdOff");
+        assert.equal(await circles(off, "Voice of the Wild"), 4);
+        assert.match(off.text, /Nature's Fury: 100 points/);
+        assert.doesNotMatch(off.text, /Zealous Dedication: per-day/);
+        const on = await read(app, "ZdOn");
+        assert.equal(await circles(on, "Voice of the Wild"), 8, "4 → 8");
+        assert.equal(await circles(on, "Shape of the Wild"), 4, "2 → 4");
+        assert.equal(await circles(on, "Greater Shape of the Wild"), 2, "1 → 2");
+        assert.match(on.text, /Nature's Fury: 150 points/);
+        assert.match(on.text, /Zealous Dedication: per-day and per-event uses doubled/);
+        const lamp = await read(app, "ZdLamp");
+        assert.match(lamp.text, /Walk the Scene 2\/event/);
+        assert.match(lamp.text, /The Accusation 2\/event/);
+        assert.equal(await circles(lamp, "Count the Shadows"), 6, "3 → 6");
+      }));
+
+      test("natural armor and Ley Mage spell pool get +50%; ley points and Max Body do not", () => withApp(T, [
+        hero({ playerName: "ZdAsc", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Path of the Ascetic")] }),
+        hero({ playerName: "ZdKnight", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Knights of Celiene")] }),
+        hero({ playerName: "ZdKnight0", purchasedSkills: [skill("attunement", 1, "Knights of Celiene")] }),
+        hero({ playerName: "ZdLey", classId: "mage", purchasedPowers: ZD, purchasedSkills: [skill("mage_pool_1"), skill("attunement", 1, "Ley Mage")] }),
+        hero({ playerName: "ZdLey0", classId: "mage", purchasedSkills: [skill("mage_pool_1"), skill("attunement", 1, "Ley Mage")] }),
+      ], {}, async (app) => {
+        assert.match((await read(app, "ZdAsc")).text, /Spirit Made Steel Natural Armor: 65 points/, "45 × 1.5 = 67.5 → 65");
+        const bp = (t) => Number((t.match(/Body Points:?\s*(\d+)/) || [])[1]);
+        assert.equal(bp((await read(app, "ZdKnight")).text), bp((await read(app, "ZdKnight0")).text), "Max Body unchanged");
+        const pool = (t) => Number((t.match(/Pool: (\d+)/) || [])[1]);
+        assert.equal(pool((await read(app, "ZdLey")).text) - pool((await read(app, "ZdLey0")).text), 10, "Pool Infusion 25 → 35");
+      }));
+
+      test("Gunmage: Joules +50% and dailies doubled", () => withApp(T, [
+        hero({ playerName: "ZdGun", classId: "gunslinger", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Gunmage"), skill("gm_joules_1", 4), skill("gm_conservation", 2)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "ZdGun"); await tab(app, "Attunement");
+        assert.match(await text(app.frame), /Joules: 27 \(10 free \+ 8 bought, \+50% Zealous Dedication\)/);
+        await back(app);
+        const s = await read(app, "ZdGun");
+        assert.match(s.text, /Joules: 27/);
+        assert.equal(await circles(s, "Conservation"), 4);
+      }));
+
+      test("power needs a single attunement with 100+ Favor", () => withApp(T, [
+        hero({ playerName: "ZdOk", purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+        hero({ playerName: "ZdLow", favorLog: [favor(1, 99)], purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+        hero({ playerName: "ZdTwo", favorLog: [favor(1, 100), favor(2, 5)], purchasedSkills: [skill("attunement", 1, "Reaper"), skill("second_attunement", 1, "Shaman")] }),
+        hero({ playerName: "ZdNone", purchasedSkills: [] }),
+      ], {}, async (app) => {
+        const eligible = async (who) => {
+          await openCharacter(app, who);
+          const box = app.frame.locator('input[placeholder="Search powers..."]').last();
+          await box.click(); await box.fill("Zealous"); await pause(app.frame);
+          const t = await app.frame.locator("div.absolute.z-50").last().innerText();
+          await box.fill(""); await app.frame.locator("body").click({ position: { x: 5, y: 5 } }); await pause(app.frame); await back(app);
+          return /Available[\s\S]*Zealous Dedication/i.test(t) && !/Not eligible[\s\S]*Zealous Dedication/i.test(t);
+        };
+        assert.equal(await eligible("ZdOk"), true, "single attunement, 100 Favor");
+        assert.equal(await eligible("ZdLow"), false, "99 Favor");
+        assert.equal(await eligible("ZdTwo"), false, "two attunements");
+        assert.equal(await eligible("ZdNone"), false, "no attunement");
+      }));
+
+      test("taking it locks out a Second Attunement", () => withApp(T, [
+        hero({ playerName: "ZdLock", purchasedPowers: ZD, purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+        hero({ playerName: "ZdFree", purchasedSkills: [skill("attunement", 1, "Reaper")] }),
+      ], {}, async (app) => {
+        const btn = () => app.frame.locator("button").filter({ hasText: /Second Attunement/ }).last();
+        await openCharacter(app, "ZdLock"); await tab(app, "Attunement");
+        assert.equal(await btn().isDisabled(), true);
+        assert.match((await btn().getAttribute("title")) || "", /Cannot have Zealous Dedication/);
+        await back(app);
+        await openCharacter(app, "ZdFree"); await tab(app, "Attunement");
+        assert.equal(await btn().isDisabled(), false);
+      }));
+    });
+
     // ---------------- Gunmage (101st MC(A)) ----------------
     // Ranks unlock SP purchases instead of granting abilities. Likely break points:
     // Joule pricing and totals, rank gates from Favor, the 51-75 band, prerequisite
