@@ -670,6 +670,18 @@ for (const T of TARGETS) {
         }
       }));
 
+      test("mana rows show points: first range 1 SP per 2 Mana, second range 1 SP per Mana", () => withApp(T, [
+        char({ name: "Pal", playerName: "MnPal", classId: "paladin", earnedSP: 60, purchasedSkills: [skill("pal_mana_1", 10), skill("pal_mana_2", 5)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "MnPal");
+        const row = (re) => app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: re }).first();
+        assert.match(await row(/^Mana \(1–20\)/).innerText(), /1 SP \/ 2 Mana[\s\S]*20 Mana/);
+        assert.match(await row(/^Mana \(21–40\)/).innerText(), /1 SP \/ 1 Mana[\s\S]*5 Mana/);
+        const before = await unspent(app);
+        await row(/^Mana \(21–40\)/).locator("button", { hasText: "+" }).click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - 1, "1 more Mana in the second range costs 1 SP");
+      }));
+
       if (T.name === "hub") test("2026 pricing fixes: mana points, missing tiers, SP owed, guarded and run once", async () => {
         const a = char({ id: "pr-a", name: "Mana", playerName: "PrA", classId: "mage", earnedSP: 200, purchasedSkills: [skill("mage_pool_1"), skill("mage_mana_1", 42)] });
         const b = char({ id: "pr-b", name: "Smith", playerName: "PrB", startingSP: 9, earnedSP: 0, purchasedSkills: [skill("smithing_5")] });
