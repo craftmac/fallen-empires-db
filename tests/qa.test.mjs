@@ -656,6 +656,20 @@ for (const T of TARGETS) {
         assert.doesNotMatch((await printSheet(app)).text, /Resist Toxin/, "not their species");
       }));
 
+      test("Elementalkin Resist Elemental, Kitsune Evade and Half-Troll Regeneration get the free uses too", () => withApp(T, [
+        char({ name: "Djinn10", playerName: "SfDj", species: "Djinn (Elementalkin)", earnedSP: 100 }),
+        char({ name: "Kit10", playerName: "SfKit", species: "Kitsune", earnedSP: 100 }),
+        char({ name: "Troll1", playerName: "SfTr", species: "Half-Troll", earnedSP: 0 }),
+      ], {}, async (app) => {
+        for (const [who, label, n] of [["SfDj", "Resist Elemental", 2], ["SfKit", "Evade", 2], ["SfTr", "Regeneration", 1]]) {
+          await openCharacter(app, who, { edit: false });
+          const before = await unspent(app);
+          assert.equal(await circles(await printSheet(app), label), n, `${who}: ${label}`);
+          assert.equal(before, 50 + (who === "SfTr" ? 0 : 100), "free uses cost nothing");
+          await back(app);
+        }
+      }));
+
       if (T.name === "hub") test("2026 pricing fixes: mana points, missing tiers, SP owed, guarded and run once", async () => {
         const a = char({ id: "pr-a", name: "Mana", playerName: "PrA", classId: "mage", earnedSP: 200, purchasedSkills: [skill("mage_pool_1"), skill("mage_mana_1", 42)] });
         const b = char({ id: "pr-b", name: "Smith", playerName: "PrB", startingSP: 9, earnedSP: 0, purchasedSkills: [skill("smithing_5")] });
