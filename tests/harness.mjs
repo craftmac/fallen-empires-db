@@ -49,6 +49,7 @@ window.tfeBridge = {
   async gmSave(c) { __calls.push("gmSave:" + c.name); const d = toRecord(c); let r; if (c.__rid) { r = store.rows.find((x) => x.id === c.__rid); Object.assign(r, d); } else { r = { id: "r" + store.n++, ...d }; store.rows.push(r); } persist(); return fromRecord(clone(r)); },
   async gmSeed() { __calls.push("gmSeed"); return { seeded: 0 }; },
   async gmBackup(label) { __calls.push("gmBackup"); if (fx.fixBackupFails) throw Error("Server error during backup: entity not found"); window.__backups = (window.__backups || []).concat([{ label, rows: clone(store.rows) }]); return { ok: true, count: store.rows.length, parts: 1 }; },
+  async gmPricingPlan() { __calls.push("gmPricingPlan"); return { pricing: clone(fx.pricingPlan || []) }; },
   async gmFixPlan() { __calls.push("gmFixPlan"); if (!fx.fixPlan) throw Error("no plan"); return clone(fx.fixPlan); },
   async gmDelete(c) { __calls.push("gmDelete:" + c.id); store.rows = store.rows.filter((x) => x.id !== c.__rid); window.__store = store; persist(); },
   async playerList(email) { __calls.push("playerList:" + norm(email)); return clone(store.rows.filter((r) => r.player_email === norm(email))).map(fromRecord); },
@@ -99,8 +100,8 @@ export async function open(target, chars, opts = {}) {
   const page = await ctx.newPage();
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
-  await page.addInitScript(({ chars, role, email, target, gmEmail, fixPlan, fixBackupFails }) => {
-    window.__TFE_FIXTURE = { chars, role, email, fixPlan, fixBackupFails };
+  await page.addInitScript(({ chars, role, email, target, gmEmail, fixPlan, fixBackupFails, pricingPlan }) => {
+    window.__TFE_FIXTURE = { chars, role, email, fixPlan, fixBackupFails, pricingPlan };
     window.open = () => ({ document: { write(h) { window.__printed = h; }, close() {} }, print() {}, focus() {} });
     try {
       if (!sessionStorage.getItem("__fixture")) {
@@ -110,7 +111,7 @@ export async function open(target, chars, opts = {}) {
         who ? sessionStorage.setItem("tfe_session_email", who) : sessionStorage.removeItem("tfe_session_email");
       }
     } catch {}
-  }, { chars, role, email: opts.email ?? "", target: target.name, gmEmail: GM_EMAIL_GH, fixPlan: opts.fixPlan ?? null, fixBackupFails: !!opts.fixBackupFails });
+  }, { chars, role, email: opts.email ?? "", target: target.name, gmEmail: GM_EMAIL_GH, fixPlan: opts.fixPlan ?? null, fixBackupFails: !!opts.fixBackupFails, pricingPlan: opts.pricingPlan ?? null });
   await page.goto(target.name === "gh" ? `${base}/gh/index.html` : `${base}/hub/`);
   const frame = await getFrame(page, target);
   await frame.waitForFunction(() => !/Loading characters/.test(document.body.innerText), null, { timeout: 15000 });

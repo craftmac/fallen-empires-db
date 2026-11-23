@@ -625,6 +625,70 @@ for (const T of TARGETS) {
       });
     });
 
+    // ---------------- Pricing: entitled variants and 2026 pricing fixes ----------------
+    describe("pricing", () => {
+      if (T.name === "hub") test("purchases move to the background/species variant the character is entitled to", () => withApp(T, [
+        char({ name: "Sch", playerName: "PrSch", classId: "mage", background: "Scholar", purchasedSkills: [skill("read_and_write", 1, "Common"), skill("mage_pool_1")] }),
+        char({ name: "Sol", playerName: "PrSol", classId: "paladin", background: "Soldier", purchasedSkills: [skill("pal_weap_ward")] }),
+        char({ name: "Hea", playerName: "PrHea", classId: "warrior", background: "Healer", purchasedSkills: [skill("first_aid"), skill("diagnose")] }),
+        char({ name: "Hum", playerName: "PrHum", species: "Human", purchasedSkills: [skill("sp_know_human", 2)] }),
+      ], {}, async (app) => {
+        await pause(app.frame, 400);
+        const ids = async (n) => (await stored(app, n)).purchasedSkills.map((p) => `${p.skillId}:${p.timesPurchased}`).sort().join(",");
+        assert.match(await ids("Sch"), /bg_scholar_read_write:1/); assert.doesNotMatch(await ids("Sch"), /(^|,)read_and_write:/);
+        assert.match(await ids("Sol"), /bg_soldier_weapon_ward:1/); assert.doesNotMatch(await ids("Sol"), /pal_weap_ward/);
+        assert.match(await ids("Hea"), /bg_healer_first_aid:1/); assert.match(await ids("Hea"), /bg_healer_diagnose:1/);
+        assert.match(await ids("Hum"), /sp_know_human_free:1/); assert.match(await ids("Hum"), /sp_know_human:1/);
+      }));
+
+      test("species uses: 1 free at 1st level and one more at 10/20/30/40; extra uses cost the listed SP", () => withApp(T, [
+        char({ name: "Dwarf1", playerName: "SfD1", species: "Hill Dwarf", earnedSP: 0 }),
+        char({ name: "Dwarf20", playerName: "SfD20", species: "Hill Dwarf", earnedSP: 200, purchasedSkills: [skill("resist_toxin", 4)] }),
+        char({ name: "Human20", playerName: "SfH20", species: "Human", earnedSP: 200 }),
+      ], {}, async (app) => {
+        await openCharacter(app, "SfD1", { edit: false });
+        assert.equal(await circles(await printSheet(app), "Resist Toxin"), 1, "1 free at 1st level"); await back(app);
+        await openCharacter(app, "SfD20", { edit: false });
+        const free = 3; // 200 earned SP = level 20: free at 1st, 10th and 20th
+        assert.equal(await circles(await printSheet(app), "Resist Toxin"), 4);
+        assert.equal(await unspent(app), 50 + 200 - 4 * Math.max(0, 4 - free), `only uses beyond ${free} free are paid`); await back(app);
+        await openCharacter(app, "SfH20", { edit: false });
+        assert.doesNotMatch((await printSheet(app)).text, /Resist Toxin/, "not their species");
+      }));
+
+      test("Elementalkin Resist Elemental, Kitsune Evade and Half-Troll Regeneration get the free uses too", () => withApp(T, [
+        char({ name: "Djinn10", playerName: "SfDj", species: "Djinn (Elementalkin)", earnedSP: 100 }),
+        char({ name: "Kit10", playerName: "SfKit", species: "Kitsune", earnedSP: 100 }),
+        char({ name: "Troll1", playerName: "SfTr", species: "Half-Troll", earnedSP: 0 }),
+      ], {}, async (app) => {
+        for (const [who, label, n] of [["SfDj", "Resist Elemental", 2], ["SfKit", "Evade", 2], ["SfTr", "Regeneration", 1]]) {
+          await openCharacter(app, who, { edit: false });
+          const before = await unspent(app);
+          assert.equal(await circles(await printSheet(app), label), n, `${who}: ${label}`);
+          assert.equal(before, 50 + (who === "SfTr" ? 0 : 100), "free uses cost nothing");
+          await back(app);
+        }
+      }));
+
+      if (T.name === "hub") test("2026 pricing fixes: mana points, missing tiers, SP owed, guarded and run once", async () => {
+        const a = char({ id: "pr-a", name: "Mana", playerName: "PrA", classId: "mage", earnedSP: 200, purchasedSkills: [skill("mage_pool_1"), skill("mage_mana_1", 42)] });
+        const b = char({ id: "pr-b", name: "Smith", playerName: "PrB", startingSP: 9, earnedSP: 0, purchasedSkills: [skill("smithing_5")] });
+        const c = char({ id: "pr-c", name: "Edited", playerName: "PrC", classId: "mage", earnedSP: 200, purchasedSkills: [skill("mage_pool_1"), skill("mage_mana_1", 30)] });
+        const pricingPlan = [{ id: "pr-a", ops: [["set", "mage_mana_1", 42, 21]] }, { id: "pr-b", ops: [["add", "smithing", 4, "smithing_5"]] }, { id: "pr-c", ops: [["set", "mage_mana_1", 42, 21]] }];
+        await withApp(T, [a, b, c], { pricingPlan }, async (app) => {
+          await app.frame.locator("button", { hasText: "Fix 2026 pricing" }).click(); await pause(app.frame);
+          await app.frame.locator("button", { hasText: "Back up and fix pricing" }).click();
+          await app.frame.waitForFunction(() => /Corrected \d+|Stopped:/.test(document.body.innerText), null, { timeout: 60000 });
+          assert.match(await text(app.frame), /Corrected 2/);
+          const n = async (who, id) => (await stored(app, who)).purchasedSkills.filter((p) => p.skillId === id).reduce((x, p) => x + p.timesPurchased, 0);
+          assert.equal(await n("Mana", "mage_mana_1"), 21);
+          assert.equal(await n("Smith", "smithing"), 4); assert.match((await stored(app, "Smith")).notes, /SP owed: with the full skill chain/);
+          assert.equal(await n("Edited", "mage_mana_1"), 30, "count changed since the plan: left alone");
+          for (const who of ["Mana", "Smith", "Edited"]) assert.equal((await stored(app, who)).pricing2026Done, true);
+        });
+      });
+    });
+
     // ---------------- Dailies: any number of purchases ----------------
     describe("dailies", () => {
       test("Barrier (a Daily) can be bought again and each purchase is a circle", () => withApp(T, [
@@ -848,10 +912,10 @@ for (const T of TARGETS) {
     // ---------------- Printed sheet ----------------
     describe("printed sheet", () => {
       test("layout: attunements side by side, narrow Checkout, no Tickets, resets never split", () => withApp(T, [
-        char({ name: "Printer", playerName: "Pri", classId: "mage", favorLog: [favor(1, 20), favor(2, 20)], checkout: { membership: true },
+        char({ name: "Printer", playerName: "PtrLayout", classId: "mage", favorLog: [favor(1, 20), favor(2, 20)], checkout: { membership: true },
           purchasedSkills: [skill("attunement", 1, "Reaper"), skill("second_attunement", 1, "Riverwalkers"), skill("mage_pool_1")] }),
       ], {}, async (app) => {
-        await openCharacter(app, "Pri", { edit: false });
+        await openCharacter(app, "PtrLayout", { edit: false });
         const s = await printSheet(app);
         assert.match(s.text, /Printer/);
         assert.doesNotMatch(s.text, /Tickets Available/);
