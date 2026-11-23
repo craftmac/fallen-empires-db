@@ -519,6 +519,36 @@ for (const T of TARGETS) {
       }));
     });
 
+    // ---------------- Dailies: any number of purchases ----------------
+    describe("dailies", () => {
+      test("Barrier (a Daily) can be bought again and each purchase is a circle", () => withApp(T, [
+        char({ name: "Barrier Pal", playerName: "DlPal", classId: "paladin", earnedSP: 60, purchasedSkills: [skill("pal_barrier", 3)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "DlPal");
+        const row = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: /^Barrier/ }).first();
+        const before = await unspent(app);
+        await row.locator("button", { hasText: "+" }).click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - 3, "4th Barrier costs 3 SP");
+        await save(app);
+        const sheet = await printSheet(app);
+        assert.equal(await circles(sheet, "Barrier"), 4);
+      }));
+
+      test("Void Familiar: 2 action circles per purchase; species Resist Magic repeatable; Gunsmithing caps at 5", () => withApp(T, [
+        char({ name: "Familiar", playerName: "DlWlk", classId: "warlock", earnedSP: 60, purchasedSkills: [skill("wlk_familiar", 3)] }),
+        char({ name: "Pixie", playerName: "DlPix", species: "Pixie", earnedSP: 60, purchasedSkills: [skill("resist_magic", 2)] }),
+        char({ name: "Smith", playerName: "DlGun", classId: "gunslinger", earnedSP: 60, purchasedSkills: [skill("gun_gunsmithing", 5)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "DlWlk", { edit: false });
+        assert.equal(await circles(await printSheet(app), "Void Familiar Actions"), 6); await back(app);
+        await openCharacter(app, "DlPix", { edit: false });
+        assert.equal(await circles(await printSheet(app), "Resist Magic"), 2); await back(app);
+        await openCharacter(app, "DlGun");
+        const row = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: /^Gunsmithing/ }).first();
+        assert.equal(await row.locator("button", { hasText: "+" }).isDisabled(), true, "Gunsmithing max 5");
+      }));
+    });
+
     // ---------------- Wiki species powers and skills ----------------
     describe("wiki species powers", () => {
       const picks = async (app, who, q) => {
