@@ -701,6 +701,25 @@ for (const T of TARGETS) {
       });
     });
 
+    // ---------------- Mage class features by school ----------------
+    describe("mage schools", () => {
+      test("features follow the schools bought: Spirit only, Elemental only, both, none", () => withApp(T, [
+        char({ name: "Sp", playerName: "MsSp", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Spirit")] }),
+        char({ name: "El", playerName: "MsEl", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Elemental")] }),
+        char({ name: "Bo", playerName: "MsBo", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Spirit"), skill("mage_school_2", 1, "Evocation")] }),
+        char({ name: "No", playerName: "MsNo", classId: "mage", earnedSP: 40, purchasedSkills: [] }),
+      ], {}, async (app) => {
+        const sheet = async (who) => { await openCharacter(app, who, { edit: false }); const s = await printSheet(app); await back(app); return s; };
+        const sp = await sheet("MsSp"), el = await sheet("MsEl"), bo = await sheet("MsBo"), no = await sheet("MsNo");
+        assert.match(sp.text, /Shared Light/); assert.doesNotMatch(sp.text, /Reclamation|Elemental Duplication/);
+        assert.match(el.text, /Elemental Duplication/); assert.doesNotMatch(el.text, /Reclamation|Shared Light/);
+        assert.ok(await circles(el, "Elemental Duplication") >= 2, "2+ uses");
+        assert.match(bo.text, /Reclamation/); assert.doesNotMatch(bo.text, /Shared Light|Elemental Duplication/);
+        assert.ok(await circles(bo, "Reclamation") >= 1);
+        assert.doesNotMatch(no.text, /Reclamation|Shared Light|Elemental Duplication/);
+      }));
+    });
+
     // ---------------- Warlock Dark Pact ----------------
     describe("warlock pacts", () => {
       test("Dark Pact dropdown unlocks the pact's purchases; Knowledge adds 20 Mana at 1 SP each", () => withApp(T, [
