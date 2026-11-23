@@ -519,6 +519,34 @@ for (const T of TARGETS) {
       }));
     });
 
+    // ---------------- Wiki species powers and skills ----------------
+    describe("wiki species powers", () => {
+      const picks = async (app, who, q) => {
+        await openCharacter(app, who);
+        const box = app.frame.locator('input[placeholder="Search powers..."]').first();
+        await box.click(); await box.fill(q); await pause(app.frame);
+        const t = await app.frame.locator("div.absolute.z-50").last().innerText();
+        await box.fill(""); await app.frame.locator("body").click({ position: { x: 5, y: 5 } }); await pause(app.frame); await back(app);
+        return t;
+      };
+      test("species powers from the wiki are pickable by their species only", () => withApp(T, [
+        char({ playerName: "WsSidhe", species: "Sidhe (Fae)" }), char({ playerName: "WsOrc", species: "Orc" }),
+        char({ playerName: "WsDrak", species: "Metallic Drakken (Gold)" }),
+      ], {}, async (app) => {
+        assert.match(await picks(app, "WsSidhe", "Essence"), /Available[\s\S]*Essence Born/i);
+        assert.match(await picks(app, "WsOrc", "Essence"), /Not eligible[\s\S]*Essence Born/i);
+        assert.match(await picks(app, "WsDrak", "Steel Heart"), /Available[\s\S]*Steel Heart/i);
+      }));
+      test("Sidhe can buy extra Gaze Charm; Barrows extra Resist Psionics", () => withApp(T, [
+        char({ playerName: "WsGaze", species: "Sidhe", earnedSP: 20 }), char({ playerName: "WsBar", species: "Barrows", earnedSP: 20 }),
+      ], {}, async (app) => {
+        await openCharacter(app, "WsGaze"); await tab(app, "Species");
+        assert.match(await text(app.frame), /Gaze Charm \(Sidhe — 4 SP\)/); await back(app);
+        await openCharacter(app, "WsBar"); await tab(app, "Species");
+        assert.match(await text(app.frame), /Resist Psionics \(Barrows — 2 SP\)/);
+      }));
+    });
+
     // ---------------- Gunmage (101st MC(A)) ----------------
     // Ranks unlock SP purchases instead of granting abilities. Likely break points:
     // Joule pricing and totals, rank gates from Favor, the 51-75 band, prerequisite
