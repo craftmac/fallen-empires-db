@@ -519,6 +519,61 @@ for (const T of TARGETS) {
       }));
     });
 
+    // ---------------- 2026 import fixes (Base44 copy only) ----------------
+    if (T.name === "hub") describe("2026 import fixes", () => {
+      const imp = (lines) => ["Imported from workbook tab: \"x\".", "IMPORT ERRORS / CHECK THESE:", ...lines].join("\n");
+      const runFix = async (app) => {
+        await app.frame.locator("button", { hasText: "Fix 2026 import" }).click(); await pause(app.frame);
+        await app.frame.locator("button", { hasText: "Back up and fix" }).click();
+        await app.frame.waitForFunction(() => /Backed up \d+ characters|Stopped:/.test(document.body.innerText), null, { timeout: 120000 });
+        return text(app.frame);
+      };
+      test("backs up first, applies the plan, skips GM-edited fields, cleans notes", async () => {
+        const a = char({ id: "fx-a", name: "Brim", playerName: "FxA", classId: "monk", species: "Barrowman", notes: imp(["- Skills not found in the app catalog - enter manually (name x times, sheet SP): Bracing Block x1 (2 SP)"]) });
+        const b = char({ id: "fx-b", name: "Gruk", playerName: "FxB", classId: "warrior", species: "Ogre", purchasedSkills: [skill("war_parry")], purchasedPowers: [{ slotIndex: 0, customName: "Overwhelming Power!" }],
+          notes: imp(["- Powers not found in the app power list (kept as typed): Overwhelming Power!", "- Skills not found in the app catalog - enter manually (name x times, sheet SP): Mystery Thing x1 (3 SP)"]) + "\nGM: owes a favor" });
+        const c = char({ id: "fx-c", name: "Edited", playerName: "FxC", classId: "monk", purchasedSkills: [skill("monk_bracing")], notes: imp(["- Skills not found in the app catalog - enter manually (name x times, sheet SP): Bracing Block x1 (2 SP)"]) });
+        const d = char({ id: "fx-d", name: "Done", playerName: "FxD", notes: "Plot: already handled" });
+        const seed = [a, b, { ...c, purchasedSkills: [] }, d].map((x) => ({ id: x.id, name: x.name, species: x.species, background: x.background, favorLog: [],
+          skills: Object.fromEntries((x.purchasedSkills || []).map((s) => [s.skillId, s.timesPurchased])) }));
+        const plan = [
+          { id: "fx-a", ops: [["species", "Barrows"], ["add", "monk_bracing", 1]], keep: [] },
+          { id: "fx-b", ops: [["power", "Overwhelming Power!", null]], keep: ["Skill from sheet not entered: Mystery Thing x1 (3 SP) - no matching app skill"] },
+          { id: "fx-c", ops: [["add", "monk_bracing", 1]], keep: [] },
+          { id: "fx-d", ops: [["add", "monk_bracing", 1]], keep: [] },
+        ];
+        await withApp(T, [a, b, c, d], { fixPlan: { plan, seed } }, async (app) => {
+          const t = await runFix(app);
+          assert.match(t, /Backed up 4 characters/);
+          const calls = await app.page.evaluate(() => window.__calls);
+          const bi = calls.indexOf("gmBackup");
+          assert.ok(bi >= 0 && calls.lastIndexOf("gmSave:Brim") > bi && calls.indexOf("gmFixPlan") > bi, "backup before the fixes are saved");
+          const sa = await stored(app, "Brim"), sb = await stored(app, "Gruk"), sc = await stored(app, "Edited"), sd = await stored(app, "Done");
+          assert.equal(sa.species, "Barrows"); assert.equal(sa.purchasedSkills.filter((s) => s.skillId === "monk_bracing").length, 1);
+          assert.equal(sa.notes, "", "all import lines resolved");
+          assert.equal(sb.purchasedPowers[0].customName, "Overwhelming Power");
+          assert.match(sb.notes, /GM: owes a favor/); assert.match(sb.notes, /CHECK THESE[\s\S]*Mystery Thing/); assert.doesNotMatch(sb.notes, /Imported from workbook/);
+          assert.equal(sc.purchasedSkills.find((s) => s.skillId === "monk_bracing").timesPurchased, 1, "GM already added it: not doubled");
+          assert.equal(sd.purchasedSkills.some((s) => s.skillId === "monk_bracing"), false, "no import notes: untouched");
+        });
+      });
+
+      test("full 2026 roster: every character's import block is processed without errors", async () => {
+        const fs = await import("node:fs");
+        const dir = new URL("../../the-fallen-empires-hub/base44/functions/", import.meta.url);
+        const roster = JSON.parse(fs.readFileSync(new URL("seedCharacters/characters.json", dir)));
+        const fixPlan = { plan: JSON.parse(fs.readFileSync(new URL("rosterFixes/plan.json", dir))), seed: JSON.parse(fs.readFileSync(new URL("rosterFixes/seed.json", dir))) };
+        await withApp(T, roster, { fixPlan }, async (app) => {
+          const t = await runFix(app);
+          assert.match(t, new RegExp(`Backed up ${roster.length} characters`));
+          const rows = await app.page.evaluate(() => window.__store.rows);
+          assert.equal(rows.filter((r) => /Imported from workbook tab|IMPORT ERRORS/.test(r.notes)).length, 0, "no import blocks left");
+          const clean = rows.filter((r) => !r.notes.trim()).length;
+          assert.ok(clean >= 95, `clean characters: ${clean}`);
+        });
+      });
+    });
+
     // ---------------- Dailies: any number of purchases ----------------
     describe("dailies", () => {
       test("Barrier (a Daily) can be bought again and each purchase is a circle", () => withApp(T, [
