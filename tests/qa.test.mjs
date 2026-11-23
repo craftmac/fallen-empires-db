@@ -71,6 +71,23 @@ for (const T of TARGETS) {
         assert.match(await style("Bea"), /#3b82f6|rgb\(59, 130, 246\)/i, "now outlined blue");
       }));
 
+      test("GM filters: 'Needs Attention' shows only red, 'Plot Notes' only blue", () => withApp(T, [
+        char({ name: "Red One", playerName: "NfRed", notes: "Owes crowns" }),
+        char({ name: "Blue One", playerName: "NfBlue", notes: "Plot: the duke" }),
+        char({ name: "Clear One", playerName: "NfClear", notes: "", plotNoteDone: true }),
+      ], {}, async (app) => {
+        const names = async () => (await app.frame.locator("button").filter({ hasText: /Nf(Red|Blue|Clear)/ }).allInnerTexts()).join(" ");
+        const red = app.frame.locator("button", { hasText: /^Needs Attention \(1\)$/ }), blue = app.frame.locator("button", { hasText: /^Plot Notes \(1\)$/ });
+        assert.match(await names(), /NfRed[\s\S]*|NfBlue/); assert.match(await names(), /NfClear/);
+        await red.click(); await pause(app.frame);
+        let t = await names(); assert.match(t, /NfRed/); assert.doesNotMatch(t, /NfBlue|NfClear/);
+        assert.equal(await red.getAttribute("aria-pressed"), "true");
+        await blue.click(); await pause(app.frame);
+        t = await names(); assert.match(t, /NfBlue/); assert.doesNotMatch(t, /NfRed|NfClear/);
+        await blue.click(); await pause(app.frame);
+        t = await names(); assert.match(t, /NfRed/); assert.match(t, /NfBlue/); assert.match(t, /NfClear/);
+      }));
+
       test("notes starting with 'plot' get a blue outline instead of red", () => withApp(T, [
         char({ name: "Plot A", playerName: "Paula", notes: "Plot: the duke owes her a favor" }),
         char({ name: "Plot B", playerName: "Quinn", notes: "  PLOT hook for next event" }),
