@@ -558,6 +558,25 @@ for (const T of TARGETS) {
         });
       });
 
+      test("if the Base44 backup fails, nothing changes until the GM continues with the downloaded file", async () => {
+        const a = char({ id: "fb-a", name: "Brim", playerName: "FbA", classId: "monk", species: "Barrowman", notes: imp(["- Skills not found in the app catalog - enter manually (name x times, sheet SP): Bracing Block x1 (2 SP)"]) });
+        const fixPlan = { plan: [{ id: "fb-a", ops: [["species", "Barrows"], ["add", "monk_bracing", 1]], keep: [] }],
+          seed: [{ id: "fb-a", name: "Brim", species: "Barrowman", background: "", favorLog: [], skills: {} }] };
+        await withApp(T, [a], { fixPlan, fixBackupFails: true }, async (app) => {
+          const dl = app.page.waitForEvent("download");
+          await app.frame.locator("button", { hasText: "Fix 2026 import" }).click(); await pause(app.frame);
+          await app.frame.locator("button", { hasText: "Back up and fix" }).click();
+          assert.match((await dl).suggestedFilename(), /^tfe-characters-backup-\d{4}-\d\d-\d\d\.json$/);
+          await app.frame.waitForFunction(() => /Base44 backup failed/.test(document.body.innerText));
+          assert.match(await text(app.frame), /entity not found/);
+          assert.equal((await stored(app, "Brim")).species, "Barrowman", "nothing changed yet");
+          await app.frame.locator("button", { hasText: "Fix using the downloaded backup" }).click();
+          await app.frame.waitForFunction(() => /Backed up \d+ characters/.test(document.body.innerText));
+          assert.match(await text(app.frame), /downloaded file only/);
+          assert.equal((await stored(app, "Brim")).species, "Barrows");
+        });
+      });
+
       test("full 2026 roster: every character's import block is processed without errors", async () => {
         const fs = await import("node:fs");
         const dir = new URL("../../the-fallen-empires-hub/base44/functions/", import.meta.url);
