@@ -56,6 +56,21 @@ for (const T of TARGETS) {
         assert.doesNotMatch(await style("Ned"), /red|#ef4444/i);
       }));
 
+      test("one-time fill: empty notes become 'Plot', existing notes are kept, and it never runs twice", () => withApp(T, [
+        char({ name: "Blank", playerName: "Bea" }),
+        char({ name: "Spaces", playerName: "Sol", notes: "   " }),
+        char({ name: "Imported", playerName: "Ivo", notes: "IMPORT ERRORS / CHECK THESE: x" }),
+        char({ name: "Handled", playerName: "Hal", plotNoteDone: true }),
+      ], {}, async (app) => {
+        await pause(app.frame, 400);
+        assert.equal((await stored(app, "Blank")).notes, "Plot");
+        assert.equal((await stored(app, "Spaces")).notes, "Plot");
+        assert.equal((await stored(app, "Imported")).notes, "IMPORT ERRORS / CHECK THESE: x");
+        assert.equal((await stored(app, "Handled")).notes || "", "", "already handled: left alone");
+        const style = async (n) => (await app.frame.locator("button").filter({ hasText: n }).first().getAttribute("style")) || "";
+        assert.match(await style("Bea"), /#3b82f6|rgb\(59, 130, 246\)/i, "now outlined blue");
+      }));
+
       test("notes starting with 'plot' get a blue outline instead of red", () => withApp(T, [
         char({ name: "Plot A", playerName: "Paula", notes: "Plot: the duke owes her a favor" }),
         char({ name: "Plot B", playerName: "Quinn", notes: "  PLOT hook for next event" }),
