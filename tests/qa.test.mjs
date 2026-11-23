@@ -670,6 +670,18 @@ for (const T of TARGETS) {
         }
       }));
 
+      test("mana rows show points: first range 1 SP per 2 Mana, second range 1 SP per Mana", () => withApp(T, [
+        char({ name: "Pal", playerName: "MnPal", classId: "paladin", earnedSP: 60, purchasedSkills: [skill("pal_mana_1", 10), skill("pal_mana_2", 5)] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "MnPal");
+        const row = (re) => app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: re }).first();
+        assert.match(await row(/^Mana \(1–20\)/).innerText(), /1 SP \/ 2 Mana[\s\S]*20 Mana/);
+        assert.match(await row(/^Mana \(21–40\)/).innerText(), /1 SP \/ 1 Mana[\s\S]*5 Mana/);
+        const before = await unspent(app);
+        await row(/^Mana \(21–40\)/).locator("button", { hasText: "+" }).click(); await pause(app.frame);
+        assert.equal(await unspent(app), before - 1, "1 more Mana in the second range costs 1 SP");
+      }));
+
       if (T.name === "hub") test("2026 pricing fixes: mana points, missing tiers, SP owed, guarded and run once", async () => {
         const a = char({ id: "pr-a", name: "Mana", playerName: "PrA", classId: "mage", earnedSP: 200, purchasedSkills: [skill("mage_pool_1"), skill("mage_mana_1", 42)] });
         const b = char({ id: "pr-b", name: "Smith", playerName: "PrB", startingSP: 9, earnedSP: 0, purchasedSkills: [skill("smithing_5")] });
@@ -685,6 +697,68 @@ for (const T of TARGETS) {
           assert.equal(await n("Smith", "smithing"), 4); assert.match((await stored(app, "Smith")).notes, /SP owed: with the full skill chain/);
           assert.equal(await n("Edited", "mage_mana_1"), 30, "count changed since the plan: left alone");
           for (const who of ["Mana", "Smith", "Edited"]) assert.equal((await stored(app, who)).pricing2026Done, true);
+        });
+      });
+    });
+
+    // ---------------- Warlock Dark Pact ----------------
+    describe("warlock pacts", () => {
+      test("Dark Pact dropdown unlocks the pact's purchases; Knowledge adds 20 Mana at 1 SP each", () => withApp(T, [
+        char({ name: "Nyxie", playerName: "PcNyx", classId: "warlock", earnedSP: 120, purchasedSkills: [skill("wlk_mana_1", 15), skill("wlk_mana_2", 30), skill("wlk_dark_pact")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "PcNyx");
+        assert.doesNotMatch(await text(app.frame), /Mana \(61–80\)/, "nothing unlocked before choosing");
+        await app.frame.locator('select[aria-label="Pact"]').selectOption("knowledge"); await pause(app.frame);
+        assert.equal(await app.frame.locator('select[aria-label="Second Pact"]').count(), 0, "second pact needs Heighten Pact");
+        const row = app.frame.locator("div.flex.items-center.gap-2.px-3.py-2").filter({ hasText: /^Mana \(61–80\) — Pact of Knowledge/ }).first();
+        assert.match(await row.innerText(), /1 SP \/ 1 Mana/);
+        const before = await unspent(app);
+        for (let k = 0; k < 3; k++) { await row.locator("button", { hasText: "+" }).click(); await pause(app.frame); }
+        assert.equal(await unspent(app), before - 3);
+        await save(app);
+        const s = await stored(app, "Nyxie");
+        assert.equal(s.pacts.first, "knowledge"); assert.equal(s.purchasedSkills.find((p) => p.skillId === "wlk_pact_mana").timesPurchased, 3);
+      }));
+
+      test("Heighten Pact allows a second pact; pact and Blood Pact circles print", () => withApp(T, [
+        char({ name: "Hexa", playerName: "PcHex", classId: "warlock", earnedSP: 200, pacts: { first: "eye", second: "iron", blood: "iron" },
+          purchasedSkills: [skill("wlk_dark_pact"), skill("wlk_pact_gifted_eye", 2)],
+          purchasedPowers: [{ slotIndex: 1, customName: "Heighten Pact" }, { slotIndex: 4, customName: "Blood Pact" }] }),
+        char({ name: "NoPact", playerName: "PcNone", classId: "warlock", earnedSP: 200, pacts: { first: "eye" }, purchasedSkills: [] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "PcHex", { edit: false });
+        const sh = await printSheet(app);
+        assert.equal(await circles(sh, "Danger Sense (Pact of the Eye)"), 1);
+        assert.equal(await circles(sh, "True Sight (Pact of the Eye)"), 1);
+        assert.equal(await circles(sh, "Damage Cap 5 (Pact of Iron)"), 1);
+        assert.equal(await circles(sh, "Half Damage (Blood Pact)"), 2);
+        assert.equal(await circles(sh, "Gifted Eye"), 2);
+        await back(app);
+        await openCharacter(app, "PcNone", { edit: false });
+        assert.doesNotMatch((await printSheet(app)).text, /Danger Sense \(Pact/, "no Dark Pact purchased: no pact");
+      }));
+    });
+
+    if (T.name === "hub") describe("GM corrections", () => {
+      test("hand-checked corrections apply once, guarded, after a backup", async () => {
+        const a = char({ id: "co-a", name: "Persi", playerName: "CoA", classId: "caller", earnedSP: 100, purchasedSkills: [skill("caller_mana_1", 40)] });
+        const b = char({ id: "co-b", name: "Nyx", playerName: "CoB", classId: "warlock", earnedSP: 200, purchasedSkills: [skill("wlk_mana_1", 15), skill("wlk_mana_2", 30), skill("wlk_dark_pact")],
+          notes: "CHECK THESE (2026 import):\n- Skill from sheet not entered: Mana (Pact) x20 (20 SP) - no matching app skill" });
+        const c = char({ id: "co-c", name: "Hilda", playerName: "CoC", classId: "warlock", earnedSP: 100, purchasedSkills: [skill("wlk_mana_1", 6)] });
+        const corrections = { version: "t1", label: "Mana corrections (test)", items: [
+          { id: "co-a", ops: [["set", "caller_mana_1", 40, 20]] },
+          { id: "co-b", ops: [["pact", "first", "knowledge"], ["add", "wlk_pact_mana", 20], ["dropNote", "Mana \\(Pact\\) x20"]] },
+          { id: "co-c", ops: [["set", "wlk_mana_1", 5, 8]] }] };
+        await withApp(T, [a, b, c], { corrections }, async (app) => {
+          await app.frame.locator("button", { hasText: "Back up and apply" }).click();
+          await app.frame.waitForFunction(() => /✓ |Stopped/.test(document.body.innerText));
+          const n = async (w, id) => (await stored(app, w)).purchasedSkills.filter((p) => p.skillId === id).reduce((x, p) => x + p.timesPurchased, 0);
+          assert.equal(await n("Persi", "caller_mana_1"), 20);
+          const nyx = await stored(app, "Nyx");
+          assert.equal(nyx.pacts.first, "knowledge"); assert.equal(await n("Nyx", "wlk_pact_mana"), 20); assert.equal(nyx.notes, "");
+          assert.equal(await n("Hilda", "wlk_mana_1"), 6, "count changed since: left alone");
+          assert.ok((await stored(app, "Hilda")).fixes.includes("t1"));
+          assert.ok((await app.page.evaluate(() => window.__calls)).includes("gmBackup"));
         });
       });
     });
