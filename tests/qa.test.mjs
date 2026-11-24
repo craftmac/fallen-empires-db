@@ -701,6 +701,25 @@ for (const T of TARGETS) {
       });
     });
 
+    // ---------------- Mage class features by school ----------------
+    describe("mage schools", () => {
+      test("features follow the schools bought: Spirit only, Elemental only, both, none", () => withApp(T, [
+        char({ name: "Sp", playerName: "MsSp", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Spirit")] }),
+        char({ name: "El", playerName: "MsEl", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Elemental")] }),
+        char({ name: "Bo", playerName: "MsBo", classId: "mage", earnedSP: 40, purchasedSkills: [skill("mage_school_1", 1, "Spirit"), skill("mage_school_2", 1, "Evocation")] }),
+        char({ name: "No", playerName: "MsNo", classId: "mage", earnedSP: 40, purchasedSkills: [] }),
+      ], {}, async (app) => {
+        const sheet = async (who) => { await openCharacter(app, who, { edit: false }); const s = await printSheet(app); await back(app); return s; };
+        const sp = await sheet("MsSp"), el = await sheet("MsEl"), bo = await sheet("MsBo"), no = await sheet("MsNo");
+        assert.match(sp.text, /Shared Light/); assert.doesNotMatch(sp.text, /Reclamation|Elemental Duplication/);
+        assert.match(el.text, /Elemental Duplication/); assert.doesNotMatch(el.text, /Reclamation|Shared Light/);
+        assert.ok(await circles(el, "Elemental Duplication") >= 2, "2+ uses");
+        assert.match(bo.text, /Reclamation/); assert.doesNotMatch(bo.text, /Shared Light|Elemental Duplication/);
+        assert.ok(await circles(bo, "Reclamation") >= 1);
+        assert.doesNotMatch(no.text, /Reclamation|Shared Light|Elemental Duplication/);
+      }));
+    });
+
     // ---------------- Warlock Dark Pact ----------------
     describe("warlock pacts", () => {
       test("Dark Pact dropdown unlocks the pact's purchases; Knowledge adds 20 Mana at 1 SP each", () => withApp(T, [
@@ -748,8 +767,10 @@ for (const T of TARGETS) {
         const corrections = { version: "t1", label: "Mana corrections (test)", items: [
           { id: "co-a", ops: [["set", "caller_mana_1", 40, 20]] },
           { id: "co-b", ops: [["pact", "first", "knowledge"], ["add", "wlk_pact_mana", 20], ["dropNote", "Mana \\(Pact\\) x20"]] },
-          { id: "co-c", ops: [["set", "wlk_mana_1", 5, 8]] }] };
-        await withApp(T, [a, b, c], { corrections }, async (app) => {
+          { id: "co-c", ops: [["set", "wlk_mana_1", 5, 8]] },
+          { id: "co-d", ops: [["label", "mage_school_1", "Spirit"], ["label", "mage_school_2", "Evocation"]] }] };
+        const d = char({ id: "co-d", name: "Magey", playerName: "CoD", classId: "mage", earnedSP: 100, purchasedSkills: [skill("mage_school_1"), skill("mage_school_2")] });
+        await withApp(T, [a, b, c, d], { corrections }, async (app) => {
           await app.frame.locator("button", { hasText: "Back up and apply" }).click();
           await app.frame.waitForFunction(() => /✓ |Stopped/.test(document.body.innerText));
           const n = async (w, id) => (await stored(app, w)).purchasedSkills.filter((p) => p.skillId === id).reduce((x, p) => x + p.timesPurchased, 0);
@@ -758,6 +779,8 @@ for (const T of TARGETS) {
           assert.equal(nyx.pacts.first, "knowledge"); assert.equal(await n("Nyx", "wlk_pact_mana"), 20); assert.equal(nyx.notes, "");
           assert.equal(await n("Hilda", "wlk_mana_1"), 6, "count changed since: left alone");
           assert.ok((await stored(app, "Hilda")).fixes.includes("t1"));
+          const md = await stored(app, "Magey");
+          assert.deepEqual(md.purchasedSkills.filter((p) => /mage_school/.test(p.skillId)).map((p) => p.label).sort(), ["Evocation", "Spirit"]);
           assert.ok((await app.page.evaluate(() => window.__calls)).includes("gmBackup"));
         });
       });
