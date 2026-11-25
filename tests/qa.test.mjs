@@ -175,6 +175,27 @@ for (const T of TARGETS) {
 
     // ---------------- SP math ----------------
     describe("skill points", () => {
+      test("Plot: Memorize Ritual is 0 SP, repeatable and needs Ritualism; Memorize Ritual stays 2 SP", () => withApp(T, [
+        char({ name: "Ritualist", playerName: "RitOk", earnedSP: 100, purchasedSkills: [
+          skill("knowledge_area", 4, "Magic"), skill("ritualism"),
+          skill("memorize_ritual", 1, "Circle of Power"),
+          skill("plot_memorize_ritual", 1, "Raise Dead"), skill("plot_memorize_ritual", 1, "Ward of Ages")] }),
+        char({ name: "No Ritualism", playerName: "RitNo", earnedSP: 100, purchasedSkills: [skill("plot_memorize_ritual", 1, "Raise Dead")] }),
+      ], {}, async (app) => {
+        await openCharacter(app, "RitOk");
+        const kn = 150 - (await unspent(app)) - 5 - 2;
+        assert.ok(kn >= 8 && kn <= 12, `only Knowledge, Ritualism (5) and one Memorize Ritual (2) cost SP (knowledge=${kn})`);
+        const s = await printSheet(app);
+        assert.match(s.text, /Raise Dead/); assert.match(s.text, /Ward of Ages/); assert.match(s.text, /Circle of Power/);
+        await s.page.close(); await back(app);
+        let t;
+        await openCharacter(app, "RitNo");
+        await tab(app, "Everyman Skills");
+        t = await text(app.frame);
+        assert.match(t, /\+ Add Plot: Memorize Ritual\s*0 SP each/);
+        if (T.name === "hub") assert.match((await stored(app, "No Ritualism")).notes, /Ritualism/, "missing Ritualism is flagged");
+      }));
+
       test("unspent SP = starting + earned - skill costs", () => withApp(T, [
         char({ name: "Math", playerName: "Max", earnedSP: 100, purchasedSkills: [skill("track", 3)] }),
       ], {}, async (app) => {
