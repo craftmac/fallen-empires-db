@@ -7,7 +7,7 @@
 //         loaded inside a parent page that provides a stand-in for Base44
 //         (window.tfeBridge) that follows the same access rules as the real
 //         Character entity: GMs see and edit everything; players only see their
-//         own characters and can only change Notes.
+//         own characters and can only change Notes and the Spellbook.
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -33,8 +33,8 @@ export const GM_EMAIL_HUB = "mikedcraft@gmail.com";
 const PARENT = `<!doctype html><html><body style="margin:0"><script>
 const fx = window.__TFE_FIXTURE || { chars: [], role: "gm" };
 const norm = (e) => String(e ?? "").trim().toLowerCase();
-function toRecord(c){const{__rid,notes,...sheet}=c;const pe=norm(c.playerEmail);return{name:c.name||"Unnamed",player_name:c.playerName||"",player_email:pe,notes:notes||"",legacy_id:c.id,sheet:{...sheet,playerEmail:pe}}}
-function fromRecord(r){const sh=r.sheet||{};return{...sh,id:r.legacy_id||sh.id||r.id,name:r.name??"",playerName:r.player_name??"",playerEmail:r.player_email??"",notes:r.notes??"",__rid:r.id}}
+function toRecord(c){const{__rid,notes,spellbook,...sheet}=c;const pe=norm(c.playerEmail);return{name:c.name||"Unnamed",player_name:c.playerName||"",player_email:pe,notes:notes||"",spellbook:Array.isArray(spellbook)?spellbook:[],legacy_id:c.id,sheet:{...sheet,playerEmail:pe}}}
+function fromRecord(r){const sh=r.sheet||{};return{...sh,id:r.legacy_id||sh.id||r.id,name:r.name??"",playerName:r.player_name??"",playerEmail:r.player_email??"",notes:r.notes??"",spellbook:Array.isArray(r.spellbook)?r.spellbook:[],__rid:r.id}}
 let store = JSON.parse(sessionStorage.getItem("fakeDB") || "null");
 if (!store) { store = { rows: fx.chars.map((c, i) => ({ id: "r" + (i + 1), ...toRecord(c) })), n: fx.chars.length + 1 }; }
 const persist = () => sessionStorage.setItem("fakeDB", JSON.stringify(store));
@@ -55,6 +55,7 @@ window.tfeBridge = {
   async gmDelete(c) { __calls.push("gmDelete:" + c.id); store.rows = store.rows.filter((x) => x.id !== c.__rid); window.__store = store; persist(); },
   async playerList(email) { __calls.push("playerList:" + norm(email)); return clone(store.rows.filter((r) => r.player_email === norm(email))).map(fromRecord); },
   async playerSaveNotes(email, c, notes) { const r = store.rows.find((x) => x.id === c.__rid); if (!r || r.player_email !== norm(email)) throw Error("Not your character"); r.notes = notes; persist(); return notes; },
+  async playerSaveSpellbook(email, c, rows) { const r = store.rows.find((x) => x.id === c.__rid); if (!r || r.player_email !== norm(email)) throw Error("Not your character"); r.spellbook = rows; persist(); return rows; },
 };
 </script><iframe id="db" src="/hub/character-db/index.html" style="width:100%;height:100vh;border:0"></iframe></body></html>`;
 
@@ -180,5 +181,5 @@ export async function stored(app, name) {
   if (app.target.name === "gh") {
     return app.page.evaluate((n) => JSON.parse(localStorage.getItem("tfe_characters") || "[]").find((c) => c.name === n), name);
   }
-  return app.page.evaluate((n) => { const r = window.__store.rows.find((x) => x.name === n); return r && { ...r.sheet, notes: r.notes, name: r.name }; }, name);
+  return app.page.evaluate((n) => { const r = window.__store.rows.find((x) => x.name === n); return r && { ...r.sheet, notes: r.notes, spellbook: r.spellbook, name: r.name }; }, name);
 }
