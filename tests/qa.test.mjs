@@ -1034,6 +1034,59 @@ for (const T of TARGETS) {
       }));
     });
 
+    // ---------------- Spellbook & Incants ----------------
+    describe("spellbook", () => {
+      test("GM adds spells and incants; they save and print at the very end of the sheet", () => withApp(T, [
+        char({ name: "Caster", playerName: "SbGm", classId: "mage" }),
+      ], {}, async (app) => {
+        const f = app.frame;
+        await openCharacter(app, "SbGm");
+        await f.locator("button", { hasText: "+ Add spell" }).click();
+        await f.fill('[aria-label="Spell 1 level"]', "1");
+        await f.fill('[aria-label="Spell 1 name"]', "Elemental Blade");
+        await f.fill('[aria-label="Spell 1 incant"]', "Elements, lend me your Magic <Blade>");
+        await f.locator("button", { hasText: "+ Add spell" }).click();
+        await f.fill('[aria-label="Spell 2 name"]', "Throwaway");
+        await f.locator('[aria-label="Remove spell 2"]').click();
+        await save(app);
+        const sb = (await stored(app, "Caster")).spellbook;
+        assert.deepEqual(sb.map((r) => r.spell), ["Elemental Blade"]);
+        const s = await printSheet(app);
+        assert.match(s.text, /Spellbook & Incants/i);
+        assert.ok(s.html.includes("Elements, lend me your Magic &lt;Blade&gt;"), "incant printed and escaped");
+        assert.ok(s.html.indexOf("Spellbook &amp; Incants") > s.html.lastIndexOf("Reset 2"), "printed after everything else");
+      }));
+
+      test("no spellbook section prints when it is empty", () => withApp(T, [
+        char({ name: "Fighter", playerName: "SbNone" }),
+      ], {}, async (app) => {
+        await openCharacter(app, "SbNone", { edit: false });
+        const s = await printSheet(app);
+        assert.doesNotMatch(s.text, /Spellbook & Incants/i);
+      }));
+
+      if (T.name === "hub") test("player edits and saves their own spellbook; nothing else changes", () => withApp(T, [
+        char({ name: "Wren", playerName: "SbPlay", playerEmail: "wren@example.com", classId: "caller", earnedSP: 40,
+          spellbook: [{ level: "1", spell: "Boar", incant: "I call upon Nature to grant Aspect of Magic..." }] }),
+      ], { role: "player", email: "" }, async (app) => {
+        const f = app.frame;
+        await f.fill("#tfe-login-email", "wren@example.com"); await f.click("button[type=submit]"); await pause(f, 400);
+        await openCharacter(app, "Wren", { edit: false });
+        assert.equal(await f.inputValue('[aria-label="Spell 1 name"]'), "Boar");
+        await f.locator("button", { hasText: "+ Add spell" }).click();
+        await f.fill('[aria-label="Spell 2 level"]', "2");
+        await f.fill('[aria-label="Spell 2 name"]', "Endure");
+        await f.fill('[aria-label="Spell 2 incant"]', "I call upon Nature to grant Magic Endure.");
+        await f.click("text=Save spellbook"); await pause(f, 300);
+        assert.match(await text(f), /Spellbook saved/);
+        const row = await app.page.evaluate(() => window.__store.rows.find((r) => r.name === "Wren"));
+        assert.deepEqual(row.spellbook.map((r) => r.spell), ["Boar", "Endure"]);
+        assert.equal(row.sheet.earnedSP, 40);
+        const s = await printSheet(app);
+        assert.match(s.text, /I call upon Nature to grant Magic Endure\./);
+      }));
+    });
+
     // ---------------- Analytics ----------------
     describe("analytics", () => {
       test("Popular Powers by class shows % of characters and % of picks", () => withApp(T, [
