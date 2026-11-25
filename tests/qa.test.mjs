@@ -793,6 +793,22 @@ for (const T of TARGETS) {
           assert.ok((await app.page.evaluate(() => window.__calls)).includes("gmBackup"));
         });
       });
+
+      test("spellbook import fills empty spellbooks only", async () => {
+        const rows = [{ level: "1", spell: "Boar", incant: "I call upon Nature to grant Aspect of Magic..." }, { level: "1", spell: "Brook", incant: "" }];
+        const e = char({ id: "sb-e", name: "Empty Book", playerName: "SbE", classId: "caller" });
+        const f = char({ id: "sb-f", name: "Full Book", playerName: "SbF", classId: "caller", spellbook: [{ level: "2", spell: "Mine", incant: "Player wrote this" }] });
+        const corrections = { version: "t2", label: "Spellbooks (test)", items: [{ id: "sb-e", ops: [["spellbook", rows]] }, { id: "sb-f", ops: [["spellbook", rows]] }] };
+        await withApp(T, [e, f], { corrections }, async (app) => {
+          await app.frame.locator("button", { hasText: "Back up and apply" }).click();
+          await app.frame.waitForFunction(() => /✓ |Stopped/.test(document.body.innerText));
+          assert.deepEqual((await stored(app, "Empty Book")).spellbook, rows);
+          assert.deepEqual((await stored(app, "Full Book")).spellbook.map((r) => r.spell), ["Mine"], "player's own spellbook kept");
+          await openCharacter(app, "SbE", { edit: false });
+          const s = await printSheet(app);
+          assert.ok(s.html.includes("I call upon Nature to grant Aspect of Magic..."));
+        });
+      });
     });
 
     // ---------------- Dailies: any number of purchases ----------------
