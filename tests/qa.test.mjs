@@ -88,6 +88,18 @@ for (const T of TARGETS) {
         t = await names(); assert.match(t, /NfRed/); assert.match(t, /NfBlue/); assert.match(t, /NfClear/);
       }));
 
+      test("notes starting with 'personal' get no outline and appear in neither filter", () => withApp(T, [
+        char({ name: "Pers One", playerName: "PnPers", notes: "Personal\nPortals Accessed: Blackthorn" }),
+        char({ name: "Pers Red", playerName: "PnRed", notes: "Personally owes crowns" }),
+        char({ name: "Pers Blue", playerName: "PnBlue", notes: "Plot: duke" }),
+      ], {}, async (app) => {
+        const style = async (n) => (await app.frame.locator("button").filter({ hasText: n }).first().getAttribute("style")) || "";
+        assert.doesNotMatch(await style("PnPers"), /#ef4444|#3b82f6|rgb\(239, 68, 68\)|rgb\(59, 130, 246\)/i, "no outline");
+        assert.match(await style("PnRed"), /#ef4444|rgb\(239, 68, 68\)/i, "'Personally' is not 'Personal'");
+        assert.ok(await app.frame.locator("button", { hasText: /^Needs Attention \(1\)$/ }).count());
+        assert.ok(await app.frame.locator("button", { hasText: /^Plot Notes \(1\)$/ }).count());
+      }));
+
       test("notes starting with 'plot' get a blue outline instead of red", () => withApp(T, [
         char({ name: "Plot A", playerName: "Paula", notes: "Plot: the duke owes her a favor" }),
         char({ name: "Plot B", playerName: "Quinn", notes: "  PLOT hook for next event" }),
@@ -791,6 +803,19 @@ for (const T of TARGETS) {
           const md = await stored(app, "Magey");
           assert.deepEqual(md.purchasedSkills.filter((p) => /mage_school/.test(p.skillId)).map((p) => p.label).sort(), ["Evocation", "Spirit"]);
           assert.ok((await app.page.evaluate(() => window.__calls)).includes("gmBackup"));
+        });
+      });
+
+      test("portal lists are added to Notes after the word Personal", async () => {
+        const e = char({ id: "pn-e", name: "No Notes", playerName: "PnE", notes: "Plot" });
+        const f = char({ id: "pn-f", name: "Has Notes", playerName: "PnF", notes: "Plot: duke" });
+        const corrections = { version: "t3", label: "Portals (test)", items: [
+          { id: "pn-e", ops: [["personal", "Portals Accessed: Savannah"]] }, { id: "pn-f", ops: [["personal", "Portals Accessed: Anteris"]] }] };
+        await withApp(T, [e, f], { corrections }, async (app) => {
+          await app.frame.locator("button", { hasText: "Back up and apply" }).click();
+          await app.frame.waitForFunction(() => /✓ |Stopped/.test(document.body.innerText));
+          assert.equal((await stored(app, "No Notes")).notes, "Personal\nPortals Accessed: Savannah", "placeholder 'Plot' replaced");
+          assert.equal((await stored(app, "Has Notes")).notes, "Plot: duke\n\nPersonal\nPortals Accessed: Anteris", "existing note kept first");
         });
       });
 
