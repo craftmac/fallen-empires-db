@@ -720,6 +720,15 @@ for (const T of TARGETS) {
       }));
     });
 
+    if (T.name === "hub") test("SP log: no Monthly Membership button (monthly SP is added automatically)", () => withApp(T, [
+      char({ name: "Logger", playerName: "SlLog", earnedSP: 10 }),
+    ], {}, async (app) => {
+      await openCharacter(app, "SlLog");
+      const t = await text(app.frame);
+      assert.match(t, /\$10 Add-on \(\+1 SP\)/, "the entry form is open");
+      assert.doesNotMatch(t, /Monthly Membership/);
+    }));
+
     // ---------------- Warlock Dark Pact ----------------
     describe("warlock pacts", () => {
       test("Dark Pact dropdown unlocks the pact's purchases; Knowledge adds 20 Mana at 1 SP each", () => withApp(T, [
